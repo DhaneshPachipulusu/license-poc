@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+cryptography
+pydantic
+requests
+python-multipart
+python-dateutil
