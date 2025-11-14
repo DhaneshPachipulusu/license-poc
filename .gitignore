@@ -1,0 +1,24 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Private keys (do NOT commit)
+server/private_key.pem
+server/public_key.pem
+
+# SQLite DB (never commit)
+server/licenses.db
+
+# IDE & OS trash
+.DS_Store
+Thumbs.db
+
+# Client local data
+client/agent.log
+client/license.json
