@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>License Details - {{ lic.license_id }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --primary-color: #4f46e5;
+            --secondary-color: #7c3aed;
+            --success-color: #10b981;
+            --danger-color: #ef4444;
+            --warning-color: #f59e0b;
+            --dark-bg: #1e293b;
+            --light-bg: #f8fafc;
+        }
+
+        body {
+            background-color: var(--light-bg);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            font-size: 1.5rem;
+            color: white !important;
+        }
+
+        .detail-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .card-header-custom {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            padding: 1.5rem;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .card-header-custom h5 {
+            margin: 0;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .info-row {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #f1f5f9;
+            display: flex;
+            align-items: center;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #64748b;
+            min-width: 180px;
+            font-size: 0.9rem;
+        }
+
+        .info-value {
+            color: #0f172a;
+            font-weight: 500;
+        }
+
+        .code-value {
+            font-family: 'Courier New', monospace;
+            background-color: #f1f5f9;
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+
+        .status-badge {
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-active {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+
+        .status-revoked {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        .status-expired {
+            background-color: #fed7aa;
+            color: #9a3412;
+        }
+
+        .feature-badge {
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+            display: inline-block;
+        }
+
+        .feature-enabled {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+
+        .feature-disabled {
+            background-color: #f3f4f6;
+            color: #6b7280;
+        }
+
+        .action-section {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            padding: 1.5rem;
+        }
+
+        .btn-custom {
+            padding: 0.7rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.2s;
+            border: none;
+        }
+
+        .btn-back {
+            background-color: #f1f5f9;
+            color: #475569;
+        }
+
+        .btn-back:hover {
+            background-color: #e2e8f0;
+            color: #334155;
+        }
+
+        .btn-renew {
+            background-color: var(--success-color);
+            color: white;
+        }
+
+        .btn-renew:hover {
+            background-color: #059669;
+        }
+
+        .btn-revoke {
+            background-color: var(--danger-color);
+            color: white;
+        }
+
+        .btn-revoke:hover {
+            background-color: #dc2626;
+        }
+
+        .signature-box {
+            background-color: #fafafa;
+            border: 1px dashed #d1d5db;
+            border-radius: 8px;
+            padding: 1rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.75rem;
+            color: #6b7280;
+            word-break: break-all;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .page-title {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 0.5rem;
+        }
+
+        .breadcrumb {
+            background: none;
+            padding: 0;
+            margin-bottom: 1.5rem;
+        }
+
+        .breadcrumb-item a {
+            color: #64748b;
+            text-decoration: none;
+        }
+
+        .breadcrumb-item a:hover {
+            color: var(--primary-color);
+        }
+
+        .icon-box {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 1rem;
+        }
+
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #0f172a;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-dark mb-4">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/admin/licenses">
+                <i class="bi bi-shield-lock-fill me-2"></i>
+                License Management System
+            </a>
+            <div class="d-flex align-items-center text-white">
+                <i class="bi bi-person-circle me-2" style="font-size: 1.5rem;"></i>
+                <span>Admin</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4">
+        <!-- Breadcrumb -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/admin/licenses"><i class="bi bi-house-door me-1"></i>Dashboard</a></li>
+                <li class="breadcrumb-item active">{{ lic.license_id }}</li>
+            </ol>
+        </nav>
+
+        <!-- Page Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1 class="page-title">License Details</h1>
+                <p class="text-muted">Complete information about this license</p>
+            </div>
+            <div>
+                {% if lic.revoked %}
+                    <span class="status-badge status-revoked">
+                        <i class="bi bi-x-circle-fill"></i>
+                        Revoked
+                    </span>
+                {% else %}
+                    <span class="status-badge status-active">
+                        <i class="bi bi-check-circle-fill"></i>
+                        Active
+                    </span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="row g-4">
+            <!-- License Information -->
+            <div class="col-lg-8">
+                <div class="detail-card mb-4">
+                    <div class="card-header-custom">
+                        <h5 class="section-title">
+                            <i class="bi bi-info-circle-fill text-primary"></i>
+                            License Information
+                        </h5>
+                    </div>
+                    <div>
+                        <div class="info-row">
+                            <div class="info-label">License ID</div>
+                            <div class="info-value">
+                                <span class="code-value">{{ lic.license_id }}</span>
+                            </div>
+                        </div>
+                        <div class="info-row">
+                            <div class="info-label">Customer Name</div>
+                            <div class="info-value">{{ lic.customer }}</div>
+                        </div>
+                        <div class="info-row">
+                            <div class="info-label">Machine ID</div>
+                            <div class="info-value">
+                                <span class="code-value">{{ lic.machine_id }}</span>
+                            </div>
+                        </div>
+                        <div class="info-row">
+                            <div class="info-label">Issued On</div>
+                            <div class="info-value">{{ lic.license_json.issued_on }}</div>
+                        </div>
+                        <div class="info-row">
+                            <div class="info-label">Valid Until</div>
+                            <div class="info-value">
+                                <strong>{{ lic.license_json.valid_till }}</strong>
+                            </div>
+                        </div>
+                        <div class="info-row">
+                            <div class="info-label">Grace Period</div>
+                            <div class="info-value">{{ lic.license_json.grace_days }} days</div>
+                        </div>
+                        <div class="info-row">
+                            <div class="info-label">Status</div>
+                            <div class="info-value">
+                                {% if lic.revoked %}
+                                    <span class="badge bg-danger">Revoked</span>
+                                {% else %}
+                                    <span class="badge bg-success">Active</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Features -->
+                <div class="detail-card mb-4">
+                    <div class="card-header-custom">
+                        <h5 class="section-title">
+                            <i class="bi bi-puzzle-fill text-success"></i>
+                            Enabled Features
+                        </h5>
+                    </div>
+                    <div class="p-4">
+                        {% for feature, enabled in lic.license_json.features.items() %}
+                            {% if enabled %}
+                                <span class="feature-badge feature-enabled">
+                                    <i class="bi bi-check-circle-fill"></i> {{ feature }}
+                                </span>
+                            {% else %}
+                                <span class="feature-badge feature-disabled">
+                                    <i class="bi bi-x-circle"></i> {{ feature }}
+                                </span>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- Allowed Services -->
+                <div class="detail-card mb-4">
+                    <div class="card-header-custom">
+                        <h5 class="section-title">
+                            <i class="bi bi-server text-info"></i>
+                            Allowed Services
+                        </h5>
+                    </div>
+                    <div class="p-4">
+                        {% for service in lic.license_json.allowed_services %}
+                            <span class="feature-badge feature-enabled">
+                                <i class="bi bi-hdd-network-fill"></i> {{ service }}
+                            </span>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- Digital Signature -->
+                <div class="detail-card">
+                    <div class="card-header-custom">
+                        <h5 class="section-title">
+                            <i class="bi bi-shield-check text-warning"></i>
+                            Digital Signature
+                        </h5>
+                    </div>
+                    <div class="p-4">
+                        <div class="signature-box">
+                            {{ lic.license_json.signature }}
+                        </div>
+                        <small class="text-muted d-block mt-2">
+                            <i class="bi bi-info-circle me-1"></i>
+                            This signature ensures the integrity and authenticity of the license
+                        </small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions Panel -->
+            <div class="col-lg-4">
+                <!-- Renew License -->
+                {% if not lic.revoked %}
+                <div class="action-section mb-4">
+                    <h5 class="section-title">
+                        <i class="bi bi-arrow-clockwise text-primary"></i>
+                        Renew License
+                    </h5>
+                    <p class="text-muted small mb-3">Extend the validity period of this license</p>
+                    <form action="/admin/renew" method="post">
+                        <input type="hidden" name="license_id" value="{{ lic.license_id }}">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Extend by (days)</label>
+                            <input type="number" name="extend_days" class="form-control" 
+                                   value="30" min="1" max="365" required>
+                            <small class="text-muted">Typical: 30, 90, or 365 days</small>
+                        </div>
+                        <button type="submit" class="btn btn-custom btn-renew w-100">
+                            <i class="bi bi-calendar-plus me-2"></i>Renew License
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Revoke License -->
+                <div class="action-section mb-4" style="border: 2px solid #fee2e2;">
+                    <h5 class="section-title">
+                        <i class="bi bi-x-octagon-fill text-danger"></i>
+                        Revoke License
+                    </h5>
+                    <p class="text-muted small mb-3">Permanently disable this license. This action cannot be undone.</p>
+                    <a href="/admin/revoke/{{ lic.license_id }}" 
+                       class="btn btn-custom btn-revoke w-100"
+                       onclick="return confirm('Are you sure you want to revoke this license? This action is permanent!')">
+                        <i class="bi bi-ban me-2"></i>Revoke License
+                    </a>
+                </div>
+                {% else %}
+                <div class="action-section mb-4" style="border: 2px solid #fee2e2; background-color: #fef2f2;">
+                    <h5 class="section-title text-danger">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        License Revoked
+                    </h5>
+                    <p class="text-muted small mb-0">This license has been permanently revoked and cannot be used.</p>
+                </div>
+                {% endif %}
+
+                <!-- Back Button -->
+                <a href="/admin/licenses" class="btn btn-custom btn-back w-100">
+                    <i class="bi bi-arrow-left me-2"></i>Back to Dashboard
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="mb-5"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
