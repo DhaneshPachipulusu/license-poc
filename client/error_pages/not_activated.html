@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>License Not Activated</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+            padding: 48px;
+            text-align: center;
+        }
+        
+        .icon {
+            font-size: 64px;
+            margin-bottom: 24px;
+        }
+        
+        h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+        
+        .message {
+            color: #666;
+            font-size: 16px;
+            line-height: 1.6;
+            margin-bottom: 32px;
+        }
+        
+        .activation-form {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 24px;
+        }
+        
+        .form-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 16px;
+        }
+        
+        .input-group {
+            margin-bottom: 16px;
+            text-align: left;
+        }
+        
+        label {
+            display: block;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        input::placeholder {
+            color: #aaa;
+        }
+        
+        .btn {
+            padding: 14px 32px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.3s;
+            width: 100%;
+            margin-top: 8px;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .help-text {
+            color: #666;
+            font-size: 14px;
+            margin-top: 16px;
+        }
+        
+        .support-link {
+            margin-top: 24px;
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .support-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .support-link a:hover {
+            text-decoration: underline;
+        }
+        
+        .steps {
+            text-align: left;
+            margin-bottom: 24px;
+        }
+        
+        .step {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+        
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            margin-right: 16px;
+            flex-shrink: 0;
+        }
+        
+        .step-content {
+            flex: 1;
+            padding-top: 4px;
+        }
+        
+        .step-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        
+        .step-desc {
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🔐</div>
+        <h1>License Activation Required</h1>
+        
+        <p class="message">
+            This application requires a valid license to run. Please activate your license using your product key.
+        </p>
+        
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <div class="step-title">Obtain Product Key</div>
+                    <div class="step-desc">Get your product key from your purchase email or admin</div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <div class="step-title">Enter Product Key</div>
+                    <div class="step-desc">Enter the key in the form below</div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <div class="step-title">Activate</div>
+                    <div class="step-desc">Click activate to verify and register this machine</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="activation-form">
+            <div class="form-title">Activate License</div>
+            
+            <form id="activationForm" onsubmit="activateLicense(event)">
+                <div class="input-group">
+                    <label for="productKey">Product Key</label>
+                    <input 
+                        type="text" 
+                        id="productKey" 
+                        name="productKey" 
+                        placeholder="XXXX-YYYY-ZZZZ-AAAA" 
+                        required
+                        pattern="[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{8}-[A-Z0-9]{3}"
+                        title="Format: XXXX-YYYY-ZZZZ-AAA"
+                    >
+                </div>
+                
+                <button type="submit" class="btn btn-primary" id="activateBtn">
+                    Activate License
+                </button>
+                
+                <div class="help-text">
+                    Don't have a product key? Contact your administrator or sales team.
+                </div>
+            </form>
+        </div>
+        
+        <div class="support-link">
+            Need help? <a href="mailto:support@company.com">support@company.com</a>
+        </div>
+    </div>
+    
+    <script>
+        function activateLicense(event) {
+            event.preventDefault();
+            
+            const productKey = document.getElementById('productKey').value.trim().toUpperCase();
+            const btn = document.getElementById('activateBtn');
+            
+            if (!productKey) {
+                alert('Please enter a product key');
+                return;
+            }
+            
+            // Disable button
+            btn.disabled = true;
+            btn.textContent = 'Activating...';
+            
+            // In real app, make API call to activate
+            // For now, just show alert
+            setTimeout(() => {
+                alert(`Activation request sent for key: ${productKey}\n\nIn production, this would:\n1. Send request to license server\n2. Download certificate\n3. Save encrypted certificate\n4. Reload application`);
+                
+                btn.disabled = false;
+                btn.textContent = 'Activate License';
+            }, 1500);
+        }
+        
+        // Auto-format product key as user types
+        document.getElementById('productKey').addEventListener('input', function(e) {
+            let value = e.target.value.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+            
+            // Format: XXXX-YYYY-ZZZZZZZZ-AAA
+            if (value.length > 0) {
+                let formatted = '';
+                if (value.length <= 4) {
+                    formatted = value;
+                } else if (value.length <= 8) {
+                    formatted = value.slice(0, 4) + '-' + value.slice(4);
+                } else if (value.length <= 16) {
+                    formatted = value.slice(0, 4) + '-' + value.slice(4, 8) + '-' + value.slice(8);
+                } else {
+                    formatted = value.slice(0, 4) + '-' + value.slice(4, 8) + '-' + value.slice(8, 16) + '-' + value.slice(16, 19);
+                }
+                e.target.value = formatted;
+            }
+        });
+    </script>
+</body>
+</html>

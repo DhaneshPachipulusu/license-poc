@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>License Expired</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+            padding: 48px;
+            text-align: center;
+        }
+        
+        .icon {
+            font-size: 64px;
+            margin-bottom: 24px;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        h1 {
+            color: #d32f2f;
+            font-size: 28px;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+        
+        .message {
+            color: #666;
+            font-size: 16px;
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }
+        
+        .details {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 24px;
+            text-align: left;
+        }
+        
+        .details-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .details-row:last-child {
+            border-bottom: none;
+        }
+        
+        .details-label {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .details-value {
+            color: #666;
+        }
+        
+        .actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #f5f5f5;
+            color: #666;
+        }
+        
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+        
+        .support-link {
+            margin-top: 24px;
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .support-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .support-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">⏰</div>
+        <h1>License Expired</h1>
+        
+        <p class="message">
+            Your license has expired and needs to be renewed to continue using the application.
+        </p>
+        
+        <div class="details" id="details">
+            <!-- Details will be injected by JavaScript -->
+        </div>
+        
+        <div class="actions">
+            <button class="btn btn-primary" onclick="contactSupport()">Contact Support</button>
+            <button class="btn btn-secondary" onclick="window.location.reload()">Retry</button>
+        </div>
+        
+        <div class="support-link">
+            Need help? <a href="mailto:support@company.com">support@company.com</a>
+        </div>
+    </div>
+    
+    <script>
+        // Get license details from URL parameters or localStorage
+        function getLicenseDetails() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return {
+                customer: urlParams.get('customer') || 'Unknown',
+                validUntil: urlParams.get('valid_until') || 'Unknown',
+                daysAgo: urlParams.get('days_ago') || 'Unknown'
+            };
+        }
+        
+        // Display details
+        function displayDetails() {
+            const details = getLicenseDetails();
+            const detailsDiv = document.getElementById('details');
+            
+            detailsDiv.innerHTML = `
+                <div class="details-row">
+                    <span class="details-label">Customer:</span>
+                    <span class="details-value">${details.customer}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Expired On:</span>
+                    <span class="details-value">${details.validUntil}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Days Since Expiry:</span>
+                    <span class="details-value">${details.daysAgo}</span>
+                </div>
+            `;
+        }
+        
+        function contactSupport() {
+            const details = getLicenseDetails();
+            const subject = encodeURIComponent('License Renewal Request');
+            const body = encodeURIComponent(`Hello,
+
+I would like to renew my license.
+
+Customer: ${details.customer}
+Expired: ${details.validUntil}
+
+Thank you!`);
+            
+            window.location.href = `mailto:support@company.com?subject=${subject}&body=${body}`;
+        }
+        
+        // Initialize
+        displayDetails();
+    </script>
+</body>
+</html>

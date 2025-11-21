@@ -1,5 +1,11 @@
-requests
-cryptography
-python-dateutil
-psutil
-Flask
+# Phase 1 Client - License Validation
+# Python dependencies
+
+# Cryptography
+cryptography==41.0.7
+
+# HTTP Requests (for activation)
+requests==2.31.0
+
+# No other dependencies needed!
+# Works offline after activation

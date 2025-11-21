@@ -1,7 +1,19 @@
-fastapi
-uvicorn[standard]
-cryptography
-pydantic
-requests
-python-multipart
-python-dateutil
+# Phase 1: Core License Control System
+# Python dependencies
+
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Data Validation
+pydantic==2.5.0
+
+# Cryptography
+cryptography==41.0.7
+
+# Database
+# SQLite is built-in, no extra package needed
+
+# Utilities
+python-dateutil==2.8.2
