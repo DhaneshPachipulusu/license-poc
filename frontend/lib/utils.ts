@@ -1,80 +1,64 @@
-import { format, formatDistanceToNow, isPast, differenceInDays } from 'date-fns';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+import { format, formatDistanceToNow, differenceInDays, parseISO } from 'date-fns';
 
-export const formatDate = (dateString: string): string => {
-  try {
-    return format(new Date(dateString), 'MMM dd, yyyy HH:mm');
-  } catch {
-    return 'Invalid date';
-  }
-};
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
-export const formatDateShort = (dateString: string): string => {
-  try {
-    return format(new Date(dateString), 'MMM dd, yyyy');
-  } catch {
-    return 'Invalid date';
-  }
-};
+export function formatDate(dateString: string): string {
+  return format(parseISO(dateString), 'MMM d, yyyy');
+}
 
-export const formatRelative = (dateString: string): string => {
-  try {
-    return formatDistanceToNow(new Date(dateString), { addSuffix: true });
-  } catch {
-    return 'Unknown';
-  }
-};
+export function formatDateTime(dateString: string): string {
+  return format(parseISO(dateString), 'MMM d, yyyy h:mm a');
+}
 
-export const isExpired = (dateString: string): boolean => {
-  try {
-    return isPast(new Date(dateString));
-  } catch {
-    return false;
-  }
-};
+export function formatRelative(dateString: string): string {
+  return formatDistanceToNow(parseISO(dateString), { addSuffix: true });
+}
 
-export const daysUntilExpiry = (dateString: string): number => {
-  try {
-    return differenceInDays(new Date(dateString), new Date());
-  } catch {
-    return 0;
-  }
-};
+export function daysUntilExpiry(validUntil: string): number {
+  return differenceInDays(parseISO(validUntil), new Date());
+}
 
-export const isExpiringSoon = (dateString: string, days: number = 7): boolean => {
-  const daysLeft = daysUntilExpiry(dateString);
-  return daysLeft >= 0 && daysLeft <= days;
-};
+export function isExpiringSoon(validUntil: string, thresholdDays = 30): boolean {
+  const days = daysUntilExpiry(validUntil);
+  return days <= thresholdDays && days > 0;
+}
 
-export const getLicenseStatus = (license: any): {
-  status: 'active' | 'expired' | 'expiring_soon' | 'revoked';
-  label: string;
-  color: string;
-} => {
-  if (license.revoked) {
-    return { status: 'revoked', label: 'Revoked', color: 'red' };
-  }
-  
-  if (isExpired(license.license_json?.valid_till || license.valid_till)) {
-    return { status: 'expired', label: 'Expired', color: 'gray' };
-  }
-  
-  if (isExpiringSoon(license.license_json?.valid_till || license.valid_till)) {
-    return { status: 'expiring_soon', label: 'Expiring Soon', color: 'yellow' };
-  }
-  
-  return { status: 'active', label: 'Active', color: 'green' };
-};
+export function isExpired(validUntil: string): boolean {
+  return daysUntilExpiry(validUntil) <= 0;
+}
 
-export const truncate = (str: string, length: number = 20): string => {
+export function getTierColor(tier: string): string {
+  const colors: Record<string, string> = {
+    trial: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+    basic: 'bg-sky-500/20 text-sky-400 border-sky-500/30',
+    pro: 'bg-violet-500/20 text-violet-400 border-violet-500/30',
+    enterprise: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  };
+  return colors[tier.toLowerCase()] || colors.basic;
+}
+
+export function getStatusColor(status: string, validUntil?: string): string {
+  if (status === 'revoked') {
+    return 'bg-red-500/20 text-red-400 border-red-500/30';
+  }
+  if (validUntil && isExpired(validUntil)) {
+    return 'bg-red-500/20 text-red-400 border-red-500/30';
+  }
+  if (validUntil && isExpiringSoon(validUntil)) {
+    return 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+  }
+  return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+}
+
+export function copyToClipboard(text: string): Promise<void> {
+  return navigator.clipboard.writeText(text);
+}
+
+export function truncate(str: string, length: number): string {
   if (str.length <= length) return str;
-  return str.substring(0, length) + '...';
-};
-
-export const copyToClipboard = async (text: string): Promise<boolean> => {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-};
+  return str.slice(0, length) + '...';
+}

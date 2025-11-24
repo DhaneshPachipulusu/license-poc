@@ -1,57 +1,77 @@
 import axios from 'axios';
 
-const API_URL =
-  process.env.NEXT_PUBLIC_LICENSE_SERVER_URL ||
-  'http://localhost:8000/api/v1';
-
 const api = axios.create({
-  baseURL: API_URL,
-  headers: { 'Content-Type': 'application/json' },
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+  headers: {
+    'Content-Type': 'application/json',
+  },
 });
 
-export const licenseApi = {
-  // 🟦 1. Get all customers
-  getAllCustomers: async () => {
-    const res = await api.get('/admin/customers');
-    return res.data.customers || [];
-  },
+// Customer APIs
+export async function getCustomers() {
+  const { data } = await api.get<{ customers: any[] }>('/api/v1/admin/customers');
+  return data;
+}
 
-  // 🟩 2. Get customer full details (machines + certificates)
-  getCustomerDetails: async (customerId: string) => {
-    const res = await api.get(`/admin/customers/${customerId}`);
-    return res.data;
-  },
+export async function getCustomer(customerId: string) {
+  const { data } = await api.get<{ customer: any; machines: any[] }>(`/api/v1/admin/customers/${customerId}`);
+  return data;
+}
 
-  // 🟧 3. Convert ALL customers → ALL licenses (flat)
-  getAllLicenses: async () => {
-    const customerRes = await api.get('/admin/customers');
-    const customers = customerRes.data.customers || [];
+export async function createCustomer(payload: {
+  company_name: string;
+  tier: string;
+  machine_limit: number;
+  valid_days: number;
+  notes?: string;
+}) {
+  const { data } = await api.post<{ success: boolean; customer: any; tier: string; message: string }>(
+    '/api/v1/admin/customers',
+    payload
+  );
+  return data;
+}
 
-    const detailResponses = await Promise.all(
-      customers.map((c: any) => api.get(`/admin/customers/${c.id}`))
-    );
+// Machine APIs
+export async function revokeMachine(machineId: string) {
+  const { data } = await api.post<{ success: boolean; message: string }>(
+    `/api/v1/admin/revoke/${machineId}`
+  );
+  return data;
+}
 
-    return detailResponses.flatMap((res: any) => {
-      const customer = res.data.customer;
-      const machines = res.data.machines || [];
+// Activation (for testing)
+export async function activateMachine(payload: {
+  product_key: string;
+  machine_fingerprint: string;
+  hostname: string;
+  os_info?: string;
+  app_version?: string;
+}) {
+  const { data } = await api.post<{ success: boolean; message: string; certificate: any }>(
+    '/api/v1/activate',
+    payload
+  );
+  return data;
+}
 
-      return machines.map((m: any) => ({
-        license_id: m.certificate?.certificate_id || m.id,
-        customer: customer.company_name,
-        machine_id: m.fingerprint,
-        revoked: m.status === 'revoked',
-        created_at: m.certificate?.issued_at || new Date().toISOString(),
-        license_json: {
-          valid_till: m.certificate?.validity?.valid_until,
-          allowed_services: m.certificate?.services
-            ? Object.keys(m.certificate.services).filter(
-                (svc) => m.certificate.services[svc].enabled
-              )
-            : [],
-        },
-      }));
-    });
-  },
-};
+// Upgrade/Renew
+export async function upgradeCertificate(payload: {
+  machine_fingerprint: string;
+  new_tier?: string;
+  additional_days?: number;
+  new_machine_limit?: number;
+  additional_services?: string[];
+}) {
+  const { data } = await api.post<{ success: boolean; certificate: any }>(
+    '/api/v1/upgrade',
+    payload
+  );
+  return data;
+}
 
-export default api;
+// Health check
+export async function healthCheck() {
+  const { data } = await api.get<{ status: string; version: string }>('/health');
+  return data;
+}
