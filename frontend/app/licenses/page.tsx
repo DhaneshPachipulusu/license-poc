@@ -5,7 +5,6 @@ import Sidebar from '@/components/Sidebar';
 import { licenseApi } from '@/lib/api';
 import { Key, Search } from 'lucide-react';
 import { formatDateShort, getLicenseStatus } from '@/lib/utils';
-import './globals.css'
 export default function LicensesPage() {
   const [licenses, setLicenses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);

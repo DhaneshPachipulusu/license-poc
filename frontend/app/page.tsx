@@ -101,16 +101,22 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen">
       <Sidebar />
 
       <div className="flex-1 ml-64">
         {/* Header */}
-        <div className="bg-white border-b border-gray-200 px-8 py-6">
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600 mt-1">
-            Overview of your license management system
-          </p>
+        <div className="bg-white/80 backdrop-blur-sm border-b border-gray-200/50 px-8 py-6 shadow-sm sticky top-0 z-40">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent">
+                Dashboard
+              </h1>
+              <p className="text-gray-600 mt-1.5 text-sm">
+                Overview of your license management system
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Main Content */}
@@ -125,72 +131,86 @@ export default function Dashboard() {
 
           {/* Additional Stats */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">License Status</h3>
-                <Activity className="w-5 h-5 text-gray-400" />
-              </div>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Active</span>
-                  <span className="font-semibold text-green-600">{stats.active}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Expired</span>
-                  <span className="font-semibold text-gray-600">{stats.expired}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Revoked</span>
-                  <span className="font-semibold text-red-600">{stats.revoked}</span>
+            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-xl transition-all duration-300">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-bold text-gray-900">License Status</h3>
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <Activity className="w-5 h-5 text-blue-600" />
                 </div>
               </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">System Health</h3>
-              <p className="text-gray-600 text-sm">All systems operational.</p>
-              <div className="mt-4">
-                <p className="text-sm text-gray-600">Machines: {stats.machines}</p>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg">
+                  <span className="text-sm font-medium text-gray-700">Active</span>
+                  <span className="font-bold text-lg text-green-600">{stats.active}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                  <span className="text-sm font-medium text-gray-700">Expired</span>
+                  <span className="font-bold text-lg text-gray-600">{stats.expired}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-red-50 rounded-lg">
+                  <span className="text-sm font-medium text-gray-700">Revoked</span>
+                  <span className="font-bold text-lg text-red-600">{stats.revoked}</span>
+                </div>
               </div>
             </div>
 
-            <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-sm p-6 text-white">
-              <h3 className="text-lg font-semibold mb-2">Quick Actions</h3>
-              <button className="w-full bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg">
-                Create License
-              </button>
+            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-xl transition-all duration-300">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">System Health</h3>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                <p className="text-gray-700 font-medium">All systems operational</p>
+              </div>
+              <div className="mt-6 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl">
+                <p className="text-sm text-gray-600 mb-1">Total Machines</p>
+                <p className="text-2xl font-bold text-gray-900">{stats.machines}</p>
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 rounded-2xl shadow-xl p-6 text-white hover:shadow-2xl transition-all duration-300 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16"></div>
+              <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full -ml-12 -mb-12"></div>
+              <div className="relative z-10">
+                <h3 className="text-lg font-bold mb-4">Quick Actions</h3>
+                <button className="w-full bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-4 py-3 rounded-xl font-semibold transition-all duration-200 hover:scale-105 shadow-lg">
+                  Create License
+                </button>
+              </div>
             </div>
           </div>
 
           {/* Recent Licenses */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">Recent Licenses</h2>
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+            <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+              <h2 className="text-xl font-bold text-gray-900">Recent Licenses</h2>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-gray-50">
+                <thead className="bg-gray-50/50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">License ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">Customer</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">Machine ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">Valid Until</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">License ID</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Customer</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Machine ID</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Valid Until</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-white divide-y divide-gray-100">
                   {recentLicenses.map((l) => {
                     const stat = getLicenseStatus(l);
                     return (
-                      <tr key={l.license_id}>
-                        <td className="px-6 py-4 font-mono text-blue-600">{l.license_id}</td>
-                        <td className="px-6 py-4">{l.customer}</td>
-                        <td className="px-6 py-4 font-mono text-gray-500">
+                      <tr key={l.license_id} className="hover:bg-gray-50/50 transition-colors">
+                        <td className="px-6 py-4 font-mono text-sm font-semibold text-blue-600">{l.license_id}</td>
+                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{l.customer}</td>
+                        <td className="px-6 py-4 font-mono text-sm text-gray-600">
                           {l.machine_id.substring(0, 16)}...
                         </td>
-                        <td className="px-6 py-4">{formatDateShort(l.license_json.valid_till)}</td>
-                        <td className="px-6 py-4">{stat.label}</td>
+                        <td className="px-6 py-4 text-sm text-gray-700">{formatDateShort(l.license_json.valid_till)}</td>
+                        <td className="px-6 py-4">
+                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                            {stat.label}
+                          </span>
+                        </td>
                       </tr>
                     );
                   })}
