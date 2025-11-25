@@ -6,21 +6,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatDate(dateString: string): string {
-  return format(parseISO(dateString), 'MMM d, yyyy');
-}
 
-export function formatDateTime(dateString: string): string {
-  return format(parseISO(dateString), 'MMM d, yyyy h:mm a');
-}
 
 export function formatRelative(dateString: string): string {
   return formatDistanceToNow(parseISO(dateString), { addSuffix: true });
 }
 
-export function daysUntilExpiry(validUntil: string): number {
-  return differenceInDays(parseISO(validUntil), new Date());
-}
+
 
 export function isExpiringSoon(validUntil: string, thresholdDays = 30): boolean {
   const days = daysUntilExpiry(validUntil);
@@ -61,4 +53,32 @@ export function copyToClipboard(text: string): Promise<void> {
 export function truncate(str: string, length: number): string {
   if (str.length <= length) return str;
   return str.slice(0, length) + '...';
+}
+export function formatDate(dateString: string | null | undefined): string {
+  if (!dateString) return '-';
+  try {
+    return format(parseISO(dateString), 'MMM d, yyyy');
+  } catch (error) {
+    return '-';
+  }
+}
+
+export function formatDateTime(dateString: string | null | undefined): string {
+  if (!dateString) return '-';
+  try {
+    return format(parseISO(dateString), 'MMM d, yyyy HH:mm');
+  } catch (error) {
+    return '-';
+  }
+}
+
+export function daysUntilExpiry(dateString: string | null | undefined): number {
+  if (!dateString) return -1;
+  try {
+    const expiry = parseISO(dateString);
+    const now = new Date();
+    return Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  } catch (error) {
+    return -1;
+  }
 }

@@ -1,21 +1,24 @@
 """
-FLEXIBLE server.py - Works with ANY Product Key Format
-=======================================================
-This version is flexible with product key validation.
-It checks if the key EXISTS in database, not if format is perfect.
-
-USE THIS VERSION - It's more practical!
+ADVANCED LICENSE SERVER v3.0
+============================
+Features:
+- Dynamic compose generation
+- Encrypted Docker credentials delivery
+- Per-tier service control
+- Activation bundle for .exe installer
 """
 
+import os
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 import json
 import uuid
 
-# Import your existing db functions
+# Import database functions
 from db import (
     init_db,
     create_customer,
@@ -32,38 +35,54 @@ from db import (
     generate_product_key
 )
 
-# Import advanced certificate generator
+# Import certificate generator
 from certificate import AdvancedCertificateGenerator
 
-app = FastAPI(
-    title="Advanced License Server",
-    description="License server with flexible product key validation",
-    version="2.0-flexible"
-)
-from fastapi.middleware.cors import CORSMiddleware
+# ===========================================
+# CONFIGURATION
+# ===========================================
 
-app.add_middleware(
-  CORSMiddleware,
-  allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-  allow_credentials=True,
-  allow_methods=["*"],
-  allow_headers=["*"],
-)
+# Docker Hub PAT - Load from environment variable (secure)
+DOCKER_PAT = os.environ.get("DOCKER_PAT", "")
 
-# Initialize certificate generator
+# Key paths
 PRIVATE_KEY = 'private_key.pem'
 PUBLIC_KEY = 'public_key.pem'
 
-cert_generator = AdvancedCertificateGenerator(PRIVATE_KEY)
+# ===========================================
+# APP INITIALIZATION
+# ===========================================
+
+app = FastAPI(
+    title="Advanced License Server",
+    description="License server with dynamic compose generation and encrypted Docker credentials",
+    version="3.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize certificate generator with Docker PAT
+cert_generator = AdvancedCertificateGenerator(
+    private_key_path=PRIVATE_KEY,
+    docker_pat=DOCKER_PAT
+)
 
 
-# ==================== PYDANTIC MODELS ====================
+# ===========================================
+# PYDANTIC MODELS
+# ===========================================
 
 class CreateCustomerRequest(BaseModel):
     company_name: str
     tier: str = "basic"
-    machine_limit: int = 3
-    valid_days: int = 365
+    machine_limit: Optional[int] = None  # None = use tier default
+    valid_days: Optional[int] = None  # None = use tier default
     notes: Optional[str] = None
 
 
@@ -88,12 +107,22 @@ class UpgradeRequest(BaseModel):
     additional_days: Optional[int] = None
     new_machine_limit: Optional[int] = None
     additional_services: Optional[List[str]] = None
+    new_image_tags: Optional[Dict[str, str]] = None
 
 
-# ==================== HELPER FUNCTIONS ====================
+class UpdateImageTagsRequest(BaseModel):
+    """Admin request to update image tags for a tier or customer"""
+    tier: Optional[str] = None
+    customer_id: Optional[str] = None
+    image_tags: Dict[str, str]  # {"frontend": "v1.2.3", "backend": "v1.0.0"}
+
+
+# ===========================================
+# HELPER FUNCTIONS
+# ===========================================
 
 def get_tier_from_product_key(product_key: str) -> str:
-    """Determine tier from product key - flexible matching"""
+    """Determine tier from product key prefix"""
     key_upper = product_key.upper()
     
     if "TRIAL" in key_upper or "TRI" in key_upper:
@@ -106,28 +135,45 @@ def get_tier_from_product_key(product_key: str) -> str:
         return "basic"
 
 
-# ==================== STARTUP ====================
+# ===========================================
+# STARTUP EVENT
+# ===========================================
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database and certificate generator"""
+    """Initialize database and check configuration"""
     init_db()
     print("✓ Database initialized")
     print("✓ Certificate generator ready")
-    print("✓ Flexible product key validation enabled")
+    
+    if DOCKER_PAT:
+        print("✓ Docker PAT configured")
+    else:
+        print("⚠ Docker PAT not configured - set DOCKER_PAT environment variable")
+    
+    print("✓ Server ready!")
 
 
-# ==================== ADMIN ENDPOINTS ====================
+# ===========================================
+# ADMIN ENDPOINTS
+# ===========================================
 
 @app.post("/api/v1/admin/customers")
 async def create_customer_endpoint(req: CreateCustomerRequest, request: Request):
     """Create a new customer with product key"""
     
+    # Get tier defaults
+    tier_limits = cert_generator.TIER_LIMITS.get(req.tier, cert_generator.TIER_LIMITS["basic"])
+    
+    machine_limit = req.machine_limit or tier_limits["max_machines"]
+    valid_days = req.valid_days or tier_limits["valid_days"]
+    
     customer = create_customer(
         company_name=req.company_name,
-        machine_limit=req.machine_limit,
-        valid_days=req.valid_days,
-        allowed_services=["dashboard"]
+        machine_limit=machine_limit,
+        valid_days=valid_days,
+        allowed_services=cert_generator.TIER_SERVICES.get(req.tier, ["frontend"]),
+        tier=req.tier  # ← FIX: Pass tier to database
     )
     
     log_action(
@@ -136,7 +182,8 @@ async def create_customer_endpoint(req: CreateCustomerRequest, request: Request)
         details={
             "company_name": req.company_name,
             "tier": req.tier,
-            "machine_limit": req.machine_limit
+            "machine_limit": machine_limit,
+            "valid_days": valid_days
         },
         ip_address=request.client.host if request.client else None
     )
@@ -173,14 +220,30 @@ async def get_customer_details(customer_id: str):
     }
 
 
-# ==================== ACTIVATION ENDPOINT ====================
+@app.get("/api/v1/admin/tiers")
+async def get_tier_info():
+    """Get tier configuration info"""
+    return {
+        "tiers": cert_generator.TIER_LIMITS,
+        "services_per_tier": cert_generator.TIER_SERVICES,
+        "service_definitions": cert_generator.SERVICE_DEFINITIONS
+    }
+
+
+# ===========================================
+# ACTIVATION ENDPOINT (Main endpoint for .exe)
+# ===========================================
 
 @app.post('/api/v1/activate')
 async def activate_machine(req: ActivationRequest, request: Request):
     """
-    Activate a machine - FLEXIBLE product key validation.
+    Activate a machine and return complete activation bundle.
     
-    Just checks if product key EXISTS in database!
+    Returns:
+    - Certificate (signed, with service permissions)
+    - Encrypted Docker credentials (AES-256-GCM, keyed to machine fingerprint)
+    - Docker compose file (dynamically generated based on tier)
+    - Public key for offline verification
     """
     
     # Check if already activated
@@ -190,39 +253,46 @@ async def activate_machine(req: ActivationRequest, request: Request):
         if certificate and isinstance(certificate, str):
             certificate = json.loads(certificate)
         
+        # Generate bundle for reactivation
+        bundle = cert_generator.generate_activation_bundle(
+            certificate=certificate,
+            machine_fingerprint=req.machine_fingerprint,
+            include_compose=True
+        )
+        
         return {
             "success": True,
-            "message": "Machine already activated",
-            "certificate": certificate,
+            "message": "Machine already activated - returning existing license",
+            "bundle": bundle,
             "reactivation": True
         }
     
-    # FLEXIBLE: Just check if product key exists in database
+    # Validate product key
     customer = get_customer_by_product_key(req.product_key)
     if not customer:
-        # Product key not found in database
         raise HTTPException(
             404, 
             f"Product key not found: {req.product_key}. "
-            "Please check the key or create a customer first."
+            "Please check the key or contact support."
         )
     
     # Check if customer is revoked
     if customer.get('revoked'):
-        raise HTTPException(403, "Customer license revoked")
+        raise HTTPException(403, "Customer license has been revoked")
     
     # Check machine limit
     active_count = count_active_machines(customer['id'])
     if active_count >= customer['machine_limit']:
         raise HTTPException(
             403, 
-            f"Machine limit reached ({active_count}/{customer['machine_limit']})"
+            f"Machine limit reached ({active_count}/{customer['machine_limit']}). "
+            "Please revoke an existing machine or upgrade your license."
         )
     
-    # Determine tier
-    tier = get_tier_from_product_key(req.product_key)
+    # Get tier from database (not from product key!)
+    tier = customer.get('tier', 'basic')  # ← FIX: Read from database
     
-    # Generate advanced certificate
+    # Generate certificate
     certificate = cert_generator.generate_certificate(
         customer_id=customer['id'],
         customer_name=customer['company_name'],
@@ -235,8 +305,16 @@ async def activate_machine(req: ActivationRequest, request: Request):
         metadata={
             "os_info": req.os_info,
             "app_version": req.app_version,
-            "activated_from_ip": request.client.host if request.client else "unknown"
+            "activated_from_ip": request.client.host if request.client else "unknown",
+            "activation_timestamp": datetime.now(timezone.utc).isoformat()
         }
+    )
+    
+    # Generate complete activation bundle
+    bundle = cert_generator.generate_activation_bundle(
+        certificate=certificate,
+        machine_fingerprint=req.machine_fingerprint,
+        include_compose=True
     )
     
     # Save to database
@@ -258,28 +336,33 @@ async def activate_machine(req: ActivationRequest, request: Request):
         details={
             "hostname": req.hostname,
             "tier": tier,
-            "certificate_id": certificate['certificate_id']
+            "certificate_id": certificate['certificate_id'],
+            "services_enabled": [s for s, c in certificate['docker']['services'].items() if c['enabled']]
         },
         ip_address=request.client.host if request.client else None
     )
     
     return {
         "success": True,
-        "message": f"✓ Activation successful! ({active_count + 1}/{customer['machine_limit']} machines) - {tier.upper()} tier",
-        "certificate": certificate,
+        "message": f"✓ Activation successful! ({active_count + 1}/{customer['machine_limit']} machines)",
+        "bundle": bundle,
         "tier": tier,
-        "customer_name": customer['company_name']
+        "customer_name": customer['company_name'],
+        "services_enabled": [s for s, c in certificate['docker']['services'].items() if c['enabled']]
     }
 
 
-# ==================== VALIDATION ENDPOINT ====================
+# ===========================================
+# VALIDATION ENDPOINT
+# ===========================================
 
 @app.post('/api/v1/validate')
 async def validate_certificate(req: ValidationRequest):
-    """Validate certificate"""
+    """Validate certificate (used by Docker container on startup)"""
     
     certificate = req.certificate
     
+    # Get fingerprint from certificate
     cert_fingerprint = certificate.get("machine", {}).get("machine_fingerprint") or \
                        certificate.get("machine_fingerprint")
     
@@ -289,6 +372,7 @@ async def validate_certificate(req: ValidationRequest):
     if cert_fingerprint != req.machine_fingerprint:
         return {"valid": False, "reason": "fingerprint_mismatch"}
     
+    # Check database
     machine = get_machine_by_fingerprint(req.machine_fingerprint)
     if not machine:
         return {"valid": False, "reason": "machine_not_found"}
@@ -306,47 +390,67 @@ async def validate_certificate(req: ValidationRequest):
         now = datetime.now(timezone.utc)
         
         if now > valid_until:
-            return {"valid": False, "reason": "expired"}
+            # Check grace period
+            grace_days = validity.get("grace_period_days", 7)
+            from datetime import timedelta
+            grace_until = valid_until + timedelta(days=grace_days)
+            
+            if now > grace_until:
+                return {"valid": False, "reason": "expired"}
+            else:
+                return {
+                    "valid": True, 
+                    "reason": "grace_period",
+                    "message": f"License expired but within {grace_days}-day grace period"
+                }
     
     # Check service permission
-    if req.service and "services" in certificate:
-        service_config = certificate["services"].get(req.service)
+    if req.service:
+        services = certificate.get("services", {})
+        service_config = services.get(req.service)
         if not service_config or not service_config.get("enabled"):
             return {
                 "valid": False,
-                "reason": f"service_{req.service}_not_allowed"
+                "reason": "service_not_allowed",
+                "service": req.service
             }
     
-    # Check Docker image
-    if req.docker_image and "docker" in certificate:
-        docker_config = certificate["docker"]
-        allowed_images = []
+    # Check Docker image permission
+    if req.docker_image:
+        docker_config = certificate.get("docker", {})
+        services = docker_config.get("services", {})
         
-        for registry_config in docker_config.get("registries", {}).values():
-            for img in registry_config.get("allowed_images", []):
-                allowed_images.append(img["image"])
+        allowed_images = []
+        for svc_name, svc_config in services.items():
+            if svc_config.get("enabled"):
+                allowed_images.append(f"{svc_config['image']}:{svc_config['tag']}")
         
         if req.docker_image not in allowed_images:
             return {
                 "valid": False,
-                "reason": f"docker_image_{req.docker_image}_not_allowed"
+                "reason": "docker_image_not_allowed",
+                "image": req.docker_image
             }
     
+    # Update last seen
     update_machine_last_seen(machine['id'])
     
     return {
         "valid": True,
         "reason": "ok",
         "tier": certificate.get("tier"),
-        "expires_at": valid_until_str
+        "expires_at": valid_until_str,
+        "services_enabled": [s for s, c in certificate.get("docker", {}).get("services", {}).items() if c.get("enabled")]
     }
 
 
-# ==================== UPGRADE ENDPOINT ====================
+# ===========================================
+# UPGRADE ENDPOINT
+# ===========================================
 
 @app.post('/api/v1/upgrade')
 async def upgrade_certificate(req: UpgradeRequest, request: Request):
-    """Upgrade certificate"""
+    """Upgrade certificate (tier, validity, services)"""
     
     machine = get_machine_by_fingerprint(req.machine_fingerprint)
     if not machine:
@@ -359,14 +463,24 @@ async def upgrade_certificate(req: UpgradeRequest, request: Request):
     if not old_certificate:
         raise HTTPException(400, "No certificate found for machine")
     
+    # Generate upgraded certificate
     new_certificate = cert_generator.upgrade_certificate(
         old_certificate=old_certificate,
         new_tier=req.new_tier,
         additional_days=req.additional_days,
         new_machine_limit=req.new_machine_limit,
-        additional_services=req.additional_services
+        additional_services=req.additional_services,
+        new_image_tags=req.new_image_tags
     )
     
+    # Generate new bundle
+    bundle = cert_generator.generate_activation_bundle(
+        certificate=new_certificate,
+        machine_fingerprint=req.machine_fingerprint,
+        include_compose=True
+    )
+    
+    # Update database
     from db import update_license
     update_license(machine['machine_id'], new_certificate)
     
@@ -376,7 +490,9 @@ async def upgrade_certificate(req: UpgradeRequest, request: Request):
         machine_id=machine['id'],
         details={
             "old_tier": old_certificate.get("tier"),
-            "new_tier": new_certificate.get("tier")
+            "new_tier": new_certificate.get("tier"),
+            "additional_days": req.additional_days,
+            "new_services": req.additional_services
         },
         ip_address=request.client.host if request.client else None
     )
@@ -386,32 +502,61 @@ async def upgrade_certificate(req: UpgradeRequest, request: Request):
         "message": "✓ Certificate upgraded successfully!",
         "old_tier": old_certificate.get("tier"),
         "new_tier": new_certificate.get("tier"),
-        "certificate": new_certificate
+        "bundle": bundle
     }
 
 
-# ==================== UTILITY ENDPOINTS ====================
+# ===========================================
+# COMPOSE ENDPOINT (Regenerate compose file)
+# ===========================================
+
+@app.get('/api/v1/compose/{machine_fingerprint}')
+async def get_compose_file(machine_fingerprint: str):
+    """Get docker-compose.yml for a machine"""
+    
+    machine = get_machine_by_fingerprint(machine_fingerprint)
+    if not machine:
+        raise HTTPException(404, "Machine not found")
+    
+    certificate = machine.get('certificate')
+    if isinstance(certificate, str):
+        certificate = json.loads(certificate)
+    
+    if not certificate:
+        raise HTTPException(400, "No certificate found")
+    
+    compose_content = cert_generator.generate_compose_file(certificate)
+    
+    return PlainTextResponse(
+        content=compose_content,
+        media_type="application/x-yaml"
+    )
+
+
+# ===========================================
+# UTILITY ENDPOINTS
+# ===========================================
 
 @app.get("/api/v1/public-key", response_class=PlainTextResponse)
 async def get_public_key():
-    """Get RSA public key"""
+    """Get RSA public key for offline verification"""
     with open(PUBLIC_KEY, "r") as f:
         return f.read()
 
 
 @app.post("/api/v1/heartbeat")
 async def heartbeat(machine_fingerprint: str):
-    """Heartbeat"""
+    """Heartbeat from client"""
     machine = get_machine_by_fingerprint(machine_fingerprint)
     if machine:
         update_machine_last_seen(machine['id'])
-        return {"status": "ok"}
+        return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
     return {"status": "not_found"}
 
 
 @app.post("/api/v1/admin/revoke/{machine_id}")
 async def revoke_machine_endpoint(machine_id: str, request: Request):
-    """Revoke machine"""
+    """Revoke a machine's license"""
     machine = get_machine_by_id(machine_id)
     if not machine:
         raise HTTPException(404, "Machine not found")
@@ -425,36 +570,52 @@ async def revoke_machine_endpoint(machine_id: str, request: Request):
         ip_address=request.client.host if request.client else None
     )
     
-    return {"success": True, "message": "Machine revoked"}
+    return {"success": True, "message": "Machine license revoked"}
 
+
+# ===========================================
+# HEALTH & INFO ENDPOINTS
+# ===========================================
 
 @app.get("/health")
 async def health_check():
-    """Health check"""
+    """Health check endpoint"""
     return {
         "status": "healthy",
-        "version": "2.0-flexible",
+        "version": "3.0",
+        "docker_pat_configured": bool(DOCKER_PAT),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
 @app.get("/")
 async def root():
-    """Root endpoint with helpful info"""
+    """Root endpoint with API info"""
     return {
         "service": "Advanced License Server",
-        "version": "2.0-flexible",
+        "version": "3.0",
         "status": "running",
         "features": [
-            "Flexible product key validation",
-            "Service permissions",
-            "Docker image access control",
+            "Dynamic compose generation",
+            "Encrypted Docker credentials",
+            "Per-tier service control",
             "Certificate upgrades",
-            "Multi-tier licensing"
+            "Offline validation support"
         ],
+        "endpoints": {
+            "activation": "POST /api/v1/activate",
+            "validation": "POST /api/v1/validate",
+            "upgrade": "POST /api/v1/upgrade",
+            "compose": "GET /api/v1/compose/{fingerprint}",
+            "public_key": "GET /api/v1/public-key"
+        },
         "docs": "/docs"
     }
 
+
+# ===========================================
+# MAIN
+# ===========================================
 
 if __name__ == "__main__":
     import uvicorn

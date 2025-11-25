@@ -1,36 +1,116 @@
 """
-ADVANCED CERTIFICATE GENERATION SYSTEM
-======================================
-Features:
-- Docker image access control with registry URLs
-- Service-level permissions (granular control)
-- Time-based expiry with grace periods
-- Machine limits with upgrade capability
-- Certificate versioning for upgrades
-- Cryptographic binding to machine fingerprint
-- Multi-layer security (AES-256-GCM + RSA-4096 + HMAC)
+ADVANCED CERTIFICATE GENERATION SYSTEM v3.1 - FIXED
+====================================================
+Fixes:
+- Proper tier detection (reads from database, not product key)
+- No networks in compose (Windows compatibility)
+- Correct volume mount with bind
+- Only enabled services in compose
 """
 
 import json
 import hashlib
 import hmac
 import secrets
+import base64
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.backends import default_backend
-import uuid
-import base64
 
 
 class AdvancedCertificateGenerator:
-    """Advanced certificate generator with multi-layer security"""
+    """Advanced certificate generator with dynamic compose support"""
     
-    def __init__(self, private_key_path: str = "private_key.pem"):
+    # ===========================================
+    # CONFIGURATION
+    # ===========================================
+    
+    REGISTRY_CONFIG = {
+        "registry_url": "docker.io",
+        "registry_username": "nainovate",
+    }
+    
+    # Service definitions with images and ports
+    SERVICE_DEFINITIONS = {
+        "frontend": {
+            "image": "nainovate/ai-dashboard-frontend",
+            "default_tag": "license",  # Changed to license
+            "container_port": 3005,
+            "host_port": 3005,
+            "required": True,
+            "description": "AI Dashboard Frontend"
+        },
+        "backend": {
+            "image": "nainovate/ai-dashboard-backend",
+            "default_tag": "license",  # Changed to license
+            "container_port": 8000,
+            "host_port": 8000,
+            "required": False,
+            "description": "AI Dashboard Backend API"
+        },
+        "analytics": {
+            "image": "nainovate/ai-dashboard-analytics",
+            "default_tag": "latest",
+            "container_port": 9000,
+            "host_port": 9000,
+            "required": False,
+            "description": "Analytics Engine"
+        },
+        "monitoring": {
+            "image": "nainovate/ai-dashboard-monitoring",
+            "default_tag": "latest",
+            "container_port": 9090,
+            "host_port": 9090,
+            "required": False,
+            "description": "Monitoring Service"
+        }
+    }
+    
+    # Tier-based service access
+    TIER_SERVICES = {
+        "trial": ["frontend"],
+        "basic": ["frontend", "backend"],
+        "pro": ["frontend", "backend", "analytics"],
+        "enterprise": ["frontend", "backend", "analytics", "monitoring"]
+    }
+    
+    # Tier-based limits
+    TIER_LIMITS = {
+        "trial": {
+            "max_machines": 1,
+            "valid_days": 14,
+            "concurrent_sessions": 1,
+            "api_rate_limit": 100
+        },
+        "basic": {
+            "max_machines": 3,
+            "valid_days": 365,
+            "concurrent_sessions": 5,
+            "api_rate_limit": 1000
+        },
+        "pro": {
+            "max_machines": 10,
+            "valid_days": 365,
+            "concurrent_sessions": 20,
+            "api_rate_limit": 5000
+        },
+        "enterprise": {
+            "max_machines": 100,
+            "valid_days": 365,
+            "concurrent_sessions": -1,
+            "api_rate_limit": -1
+        }
+    }
+    
+    def __init__(self, private_key_path: str = "private_key.pem", docker_pat: str = None):
         self.private_key_path = private_key_path
         self.private_key = self._load_or_generate_private_key()
         self.public_key = self.private_key.public_key()
+        self.docker_pat = docker_pat
         
     def _load_or_generate_private_key(self):
         """Load existing RSA key or generate new 4096-bit key"""
@@ -55,13 +135,22 @@ class AdvancedCertificateGenerator:
                     encryption_algorithm=serialization.NoEncryption()
                 ))
             
+            public_key = private_key.public_key()
             with open("public_key.pem", "wb") as f:
-                f.write(self.public_key.public_bytes(
+                f.write(public_key.public_bytes(
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PublicFormat.SubjectPublicKeyInfo
                 ))
             
             return private_key
+    
+    def _encrypt_data(self, data: str, key: bytes) -> str:
+        """Encrypt data using AES-256-GCM"""
+        derived_key = hashlib.sha256(key).digest()
+        aesgcm = AESGCM(derived_key)
+        nonce = secrets.token_bytes(12)
+        ciphertext = aesgcm.encrypt(nonce, data.encode(), None)
+        return base64.b64encode(nonce + ciphertext).decode()
     
     def generate_certificate(
         self,
@@ -70,36 +159,41 @@ class AdvancedCertificateGenerator:
         machine_fingerprint: str,
         hostname: str,
         product_key: str,
-        tier: str = "basic",
-        valid_days: int = 365,
-        machine_limit: int = 3,
-        allowed_services: Optional[List[str]] = None,
-        allowed_docker_images: Optional[List[Dict[str, str]]] = None,
-        custom_permissions: Optional[Dict[str, Any]] = None,
-        parent_cert_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        tier: str = "basic",  # Now explicitly passed from database
+        valid_days: Optional[int] = None,
+        machine_limit: Optional[int] = None,
+        custom_services: Optional[List[str]] = None,
+        custom_image_tags: Optional[Dict[str, str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        parent_cert_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Generate comprehensive certificate"""
+        """Generate comprehensive certificate with Docker configuration"""
         
         cert_id = f"CERT-{uuid.uuid4().hex[:16].upper()}"
         machine_id = f"MACHINE-{uuid.uuid4().hex[:12].upper()}"
         
+        tier_config = self.TIER_LIMITS.get(tier, self.TIER_LIMITS["basic"])
+        actual_valid_days = valid_days or tier_config["valid_days"]
+        actual_machine_limit = machine_limit or tier_config["max_machines"]
+        
         issued_at = datetime.now(timezone.utc)
-        valid_until = issued_at + timedelta(days=valid_days)
+        valid_until = issued_at + timedelta(days=actual_valid_days)
         
-        if allowed_services is None:
-            allowed_services = self._get_default_services(tier)
+        allowed_services = custom_services or self.TIER_SERVICES.get(tier, ["frontend"])
         
-        if allowed_docker_images is None:
-            allowed_docker_images = self._get_default_docker_images(tier)
+        docker_config = self._build_docker_config(
+            tier=tier,
+            allowed_services=allowed_services,
+            custom_image_tags=custom_image_tags,
+            machine_fingerprint=machine_fingerprint
+        )
         
         service_permissions = self._build_service_permissions(allowed_services, tier)
-        docker_access = self._build_docker_access_control(allowed_docker_images, tier)
-        features = self._build_feature_flags(tier, custom_permissions)
+        features = self._build_feature_flags(tier)
         
         certificate = {
             "certificate_id": cert_id,
-            "certificate_version": "2.0",
+            "certificate_version": "3.1",
             "certificate_type": "machine_license",
             "tier": tier,
             
@@ -119,19 +213,20 @@ class AdvancedCertificateGenerator:
             "validity": {
                 "issued_at": issued_at.isoformat(),
                 "valid_until": valid_until.isoformat(),
+                "valid_days": actual_valid_days,
                 "grace_period_days": 7,
                 "timezone": "UTC"
             },
             
             "limits": {
-                "max_machines": machine_limit,
+                "max_machines": actual_machine_limit,
                 "current_machine_number": 1,
-                "concurrent_sessions": self._get_session_limit(tier),
-                "api_rate_limit_per_hour": self._get_rate_limit(tier)
+                "concurrent_sessions": tier_config["concurrent_sessions"],
+                "api_rate_limit_per_hour": tier_config["api_rate_limit"]
             },
             
             "services": service_permissions,
-            "docker": docker_access,
+            "docker": docker_config,
             "features": features,
             
             "upgrade_chain": {
@@ -155,218 +250,156 @@ class AdvancedCertificateGenerator:
         
         return certificate
     
-    def _get_default_services(self, tier: str) -> List[str]:
-        """Get default services based on tier"""
-        services_by_tier = {
-            "trial": ["dashboard", "basic_analytics"],
-            "basic": ["dashboard", "analytics", "reports"],
-            "pro": ["dashboard", "analytics", "reports", "api", "integrations"],
-            "enterprise": ["dashboard", "analytics", "reports", "api", 
-                          "integrations", "custom_modules", "white_label", "sso"]
-        }
-        return services_by_tier.get(tier, ["dashboard"])
-    
-    def _get_default_docker_images(self, tier: str) -> List[Dict[str, str]]:
-        """Get default Docker images based on tier"""
+    def _build_docker_config(
+        self,
+        tier: str,
+        allowed_services: List[str],
+        custom_image_tags: Optional[Dict[str, str]] = None,
+        machine_fingerprint: str = ""
+    ) -> Dict[str, Any]:
+        """Build Docker configuration for certificate"""
         
-        base_images = [
-            {
-                "name": "frontend",
-                "registry": "registry.yourcompany.com",
-                "image": "frontend-app",
-                "tag": "latest",
-                "required": True
+        custom_image_tags = custom_image_tags or {}
+        
+        services = {}
+        for service_name in allowed_services:
+            if service_name in self.SERVICE_DEFINITIONS:
+                svc_def = self.SERVICE_DEFINITIONS[service_name]
+                services[service_name] = {
+                    "enabled": True,
+                    "image": svc_def["image"],
+                    "tag": custom_image_tags.get(service_name, svc_def["default_tag"]),
+                    "container_port": svc_def["container_port"],
+                    "host_port": svc_def["host_port"],
+                    "required": svc_def["required"],
+                    "description": svc_def["description"]
+                }
+        
+        for service_name, svc_def in self.SERVICE_DEFINITIONS.items():
+            if service_name not in services:
+                services[service_name] = {
+                    "enabled": False,
+                    "image": svc_def["image"],
+                    "tag": svc_def["default_tag"],
+                    "container_port": svc_def["container_port"],
+                    "host_port": svc_def["host_port"],
+                    "required": False,
+                    "description": svc_def["description"],
+                    "reason_disabled": f"Not included in {tier} tier"
+                }
+        
+        docker_config = {
+            "registry": {
+                "url": self.REGISTRY_CONFIG["registry_url"],
+                "username": self.REGISTRY_CONFIG["registry_username"],
             },
-            {
-                "name": "backend",
-                "registry": "registry.yourcompany.com",
-                "image": "backend-api",
-                "tag": "latest",
-                "required": True
-            }
-        ]
-        
-        tier_specific = {
-            "trial": [],
-            "basic": [
-                {
-                    "name": "analytics",
-                    "registry": "registry.yourcompany.com",
-                    "image": "analytics-engine",
-                    "tag": "basic",
-                    "required": False
-                }
-            ],
-            "pro": [
-                {
-                    "name": "analytics",
-                    "registry": "registry.yourcompany.com",
-                    "image": "analytics-engine",
-                    "tag": "pro",
-                    "required": False
-                },
-                {
-                    "name": "ml-engine",
-                    "registry": "registry.yourcompany.com",
-                    "image": "ml-processor",
-                    "tag": "latest",
-                    "required": False
-                }
-            ],
-            "enterprise": [
-                {
-                    "name": "analytics",
-                    "registry": "registry.yourcompany.com",
-                    "image": "analytics-engine",
-                    "tag": "enterprise",
-                    "required": False
-                },
-                {
-                    "name": "ml-engine",
-                    "registry": "registry.yourcompany.com",
-                    "image": "ml-processor",
-                    "tag": "enterprise",
-                    "required": False
-                },
-                {
-                    "name": "custom-modules",
-                    "registry": "registry.yourcompany.com",
-                    "image": "custom-builder",
-                    "tag": "latest",
-                    "required": False
-                }
-            ]
+            "services": services,
+            "compose_version": "3.8",
+            "network_name": "license-network"
         }
         
-        return base_images + tier_specific.get(tier, [])
+        return docker_config
     
     def _build_service_permissions(self, allowed_services: List[str], tier: str) -> Dict[str, Any]:
-        """Build granular service permissions"""
+        """Build service permissions based on tier"""
+        permissions = {}
         
-        all_services = {
-            "dashboard": {
-                "enabled": "dashboard" in allowed_services,
-                "permissions": ["read", "view"],
-                "features": ["basic_charts", "data_export"]
-            },
-            "analytics": {
-                "enabled": "analytics" in allowed_services,
-                "permissions": ["read", "view", "export"],
-                "features": ["advanced_charts", "custom_reports", "scheduled_reports"],
-                "data_retention_days": 90 if tier == "basic" else 365
-            },
-            "reports": {
-                "enabled": "reports" in allowed_services,
-                "permissions": ["read", "create", "edit", "delete"],
-                "max_reports": 10 if tier == "basic" else 100,
-                "export_formats": ["pdf", "csv", "xlsx"]
-            },
-            "api": {
-                "enabled": "api" in allowed_services,
-                "permissions": ["read", "write"],
-                "rate_limit_per_hour": 1000 if tier == "pro" else 10000,
-                "endpoints": ["v1", "v2"] if tier == "enterprise" else ["v1"]
-            },
-            "integrations": {
-                "enabled": "integrations" in allowed_services,
-                "permissions": ["configure", "execute"],
-                "available_integrations": ["webhook", "zapier", "slack"] 
-                    if tier == "pro" else ["webhook", "zapier", "slack", "custom"]
-            },
-            "custom_modules": {
-                "enabled": "custom_modules" in allowed_services,
-                "permissions": ["read", "write", "deploy"],
-                "max_modules": 5 if tier == "pro" else -1
-            },
-            "white_label": {
-                "enabled": "white_label" in allowed_services,
-                "permissions": ["customize_branding", "custom_domain"],
-            },
-            "sso": {
-                "enabled": "sso" in allowed_services,
-                "permissions": ["configure"],
-                "providers": ["saml", "oauth2", "ldap"]
-            }
+        all_possible_services = [
+            "dashboard", "analytics", "reports", "api", 
+            "integrations", "custom_modules", "white_label", "sso"
+        ]
+        
+        tier_access = {
+            "trial": ["dashboard"],
+            "basic": ["dashboard", "analytics", "reports"],
+            "pro": ["dashboard", "analytics", "reports", "api", "integrations"],
+            "enterprise": all_possible_services
         }
         
-        return all_services
-    
-    def _build_docker_access_control(self, allowed_images: List[Dict[str, str]], tier: str) -> Dict[str, Any]:
-        """Build Docker registry access control"""
+        enabled_services = tier_access.get(tier, ["dashboard"])
         
-        return {
-            "enabled": True,
-            "registries": {
-                "registry.yourcompany.com": {
-                    "authentication_required": True,
-                    "access_token_url": "https://registry.yourcompany.com/v2/token",
-                    "allowed_images": allowed_images
-                }
-            },
-            "pull_limits": {
-                "max_pulls_per_day": 100 if tier == "basic" else 1000,
-                "max_concurrent_pulls": 5 if tier == "basic" else 20
-            },
-            "image_validation": {
-                "verify_signatures": True,
-                "scan_for_vulnerabilities": tier in ["pro", "enterprise"],
-                "allowed_architectures": ["amd64", "arm64"]
+        for service in all_possible_services:
+            permissions[service] = {
+                "enabled": service in enabled_services,
+                "tier_required": self._get_minimum_tier_for_service(service)
             }
-        }
-    
-    def _build_feature_flags(self, tier: str, custom_permissions: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Build feature flags"""
         
-        base_features = {
+        return permissions
+    
+    def _get_minimum_tier_for_service(self, service: str) -> str:
+        """Get minimum tier required for a service"""
+        service_tiers = {
+            "dashboard": "trial",
+            "analytics": "basic",
+            "reports": "basic",
+            "api": "pro",
+            "integrations": "pro",
+            "custom_modules": "enterprise",
+            "white_label": "enterprise",
+            "sso": "enterprise"
+        }
+        return service_tiers.get(service, "enterprise")
+    
+    def _build_feature_flags(self, tier: str) -> Dict[str, Any]:
+        """Build feature flags based on tier"""
+        
+        features = {
             "offline_mode": {
-                "enabled": True,
-                "max_offline_days": 7 if tier == "basic" else 30
+                "enabled": tier in ["basic", "pro", "enterprise"],
+                "max_offline_days": 7 if tier == "basic" else 30 if tier == "pro" else 90
             },
-            "multi_tenancy": {
+            "auto_updates": {
                 "enabled": tier in ["pro", "enterprise"],
-                "max_tenants": 5 if tier == "pro" else -1
+                "channel": "stable" if tier == "pro" else "all"
             },
-            "backup_restore": {
-                "enabled": tier in ["pro", "enterprise"],
-                "auto_backup": tier == "enterprise",
-                "backup_frequency_hours": 24
-            },
-            "audit_logging": {
-                "enabled": tier in ["pro", "enterprise"],
-                "retention_days": 90 if tier == "pro" else 365
-            },
-            "high_availability": {
+            "priority_support": {
                 "enabled": tier == "enterprise",
-                "min_replicas": 3
+                "sla_hours": 4 if tier == "enterprise" else None
+            },
+            "custom_branding": {
+                "enabled": tier == "enterprise"
+            },
+            "api_access": {
+                "enabled": tier in ["pro", "enterprise"],
+                "rate_limit": 5000 if tier == "pro" else -1
+            },
+            "export_data": {
+                "enabled": tier in ["basic", "pro", "enterprise"],
+                "formats": ["csv"] if tier == "basic" else ["csv", "json", "xlsx"]
             }
         }
         
-        if custom_permissions:
-            base_features.update(custom_permissions)
-        
-        return base_features
-    
-    def _get_session_limit(self, tier: str) -> int:
-        limits = {"trial": 1, "basic": 3, "pro": 10, "enterprise": -1}
-        return limits.get(tier, 1)
-    
-    def _get_rate_limit(self, tier: str) -> int:
-        limits = {"trial": 100, "basic": 1000, "pro": 10000, "enterprise": 100000}
-        return limits.get(tier, 100)
+        return features
     
     def _add_cryptographic_layers(self, certificate: Dict[str, Any], machine_fingerprint: str) -> Dict[str, Any]:
         """Add cryptographic protection layers"""
         
+        # Calculate fingerprint hash
         fp_hash = hashlib.sha3_512(machine_fingerprint.encode()).hexdigest()
         certificate["security"]["fingerprint_hash"] = fp_hash
         
+        # Generate HMAC but don't add to cert yet
         hmac_key = secrets.token_bytes(64)
-        cert_bytes = json.dumps(certificate, sort_keys=True).encode()
-        hmac_digest = hmac.new(hmac_key, cert_bytes, hashlib.sha512).hexdigest()
         
+        # Create cert_bytes WITHOUT hmac fields for signing
+        cert_copy_for_hmac = certificate.copy()
+        # Remove security fields that shouldn't be in signature
+        security_backup = cert_copy_for_hmac.pop("security")
+        cert_bytes_for_hmac = json.dumps(cert_copy_for_hmac, sort_keys=True).encode()
+        hmac_digest = hmac.new(hmac_key, cert_bytes_for_hmac, hashlib.sha512).hexdigest()
+        
+        # Now add HMAC to certificate
         certificate["security"]["hmac"] = hmac_digest
         certificate["security"]["hmac_key"] = base64.b64encode(hmac_key).decode()
         
+        # Create final cert_bytes for signature (without signature fields)
+        cert_copy_for_sig = certificate.copy()
+        # Don't include signature or timestamp in what we sign
+        cert_copy_for_sig.pop("signature", None)
+        cert_copy_for_sig.pop("signature_timestamp", None)
+        cert_bytes = json.dumps(cert_copy_for_sig, sort_keys=True).encode()
+        
+        # Sign the complete certificate (including security with hmac)
         signature = self.private_key.sign(
             cert_bytes,
             padding.PSS(
@@ -381,6 +414,131 @@ class AdvancedCertificateGenerator:
         
         return certificate
     
+    def generate_docker_credentials(self, machine_fingerprint: str) -> Dict[str, str]:
+        """Generate encrypted Docker credentials for a machine"""
+        if not self.docker_pat:
+            raise ValueError("Docker PAT not configured")
+        
+        credentials = {
+            "registry": self.REGISTRY_CONFIG["registry_url"],
+            "username": self.REGISTRY_CONFIG["registry_username"],
+            "token": self.docker_pat,
+            "generated_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        encrypted = self._encrypt_data(
+            json.dumps(credentials),
+            machine_fingerprint.encode()
+        )
+        
+        return {
+            "encrypted_credentials": encrypted,
+            "encryption_method": "AES-256-GCM",
+            "key_derivation": "SHA256(machine_fingerprint)"
+        }
+    
+    def generate_compose_file(self, certificate: Dict[str, Any]) -> str:
+        """
+        Generate docker-compose.yml - FIXED for Windows
+        - No networks (Windows compatibility)
+        - Proper volume mount with bind
+        - Only enabled services
+        - Mock data folder mount
+        """
+        
+        docker_config = certificate.get("docker", {})
+        services = docker_config.get("services", {})
+        
+        compose = {
+            "services": {},
+            "volumes": {
+                "license-data": {
+                    "driver": "local",
+                    "driver_opts": {
+                        "type": "none",
+                        "o": "bind",
+                        "device": "C:/ProgramData/AILicenseDashboard/license"
+                    }
+                },
+                "app-data": {
+                    "driver": "local",
+                    "driver_opts": {
+                        "type": "none",
+                        "o": "bind",
+                        "device": "C:/ProgramData/AILicenseDashboard/data"  # ← Mock data folder
+                    }
+                }
+            }
+        }
+        
+        # Add ONLY enabled services
+        for svc_name, svc_config in services.items():
+            if svc_config.get("enabled"):  # Only if enabled!
+                image = f"{svc_config['image']}:{svc_config['tag']}"
+                
+                service_def = {
+                    "image": image,
+                    "ports": [f"{svc_config['host_port']}:{svc_config['container_port']}"],
+                    "restart": "unless-stopped",
+                    "environment": [
+                        "LICENSE_PATH=/var/license",
+                        "DATA_PATH=/var/data",  # ← Add data path env
+                        f"SERVICE_NAME={svc_name}",
+                        f"TIER={certificate.get('tier', 'basic')}"
+                    ],
+                    "volumes": [
+                        "license-data:/var/license:ro",  # License (read-only)
+                        "app-data:/var/data"  # ← App data (read-write)
+                    ]
+                }
+                
+                # Add healthcheck for frontend
+                if svc_name == "frontend":
+                    service_def["healthcheck"] = {
+                        "test": ["CMD", "wget", "-qO-", f"http://localhost:{svc_config['container_port']}/"],
+                        "interval": "30s",
+                        "timeout": "5s",
+                        "retries": 3
+                    }
+                
+                # Backend depends on frontend
+                if svc_name == "backend":
+                    service_def["depends_on"] = ["frontend"]
+                
+                compose["services"][svc_name] = service_def
+        
+        # Convert to YAML
+        import yaml
+        return yaml.dump(compose, default_flow_style=False, sort_keys=False)
+    
+    def generate_activation_bundle(
+        self,
+        certificate: Dict[str, Any],
+        machine_fingerprint: str,
+        include_compose: bool = True
+    ) -> Dict[str, Any]:
+        """Generate complete activation bundle"""
+        
+        bundle = {
+            "bundle_version": "1.0",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "certificate": certificate,
+        }
+        
+        if self.docker_pat:
+            bundle["docker_credentials"] = self.generate_docker_credentials(machine_fingerprint)
+        
+        if include_compose:
+            bundle["compose_file"] = self.generate_compose_file(certificate)
+        
+        public_key_pem = self.public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode()
+        bundle["public_key"] = public_key_pem
+        
+        return bundle
+    
     def upgrade_certificate(
         self,
         old_certificate: Dict[str, Any],
@@ -388,7 +546,7 @@ class AdvancedCertificateGenerator:
         additional_days: Optional[int] = None,
         new_machine_limit: Optional[int] = None,
         additional_services: Optional[List[str]] = None,
-        additional_docker_images: Optional[List[Dict[str, str]]] = None
+        new_image_tags: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Generate upgraded certificate"""
         
@@ -402,18 +560,24 @@ class AdvancedCertificateGenerator:
         
         old_valid_until = datetime.fromisoformat(old_certificate["validity"]["valid_until"])
         if additional_days:
-            valid_until = old_valid_until + timedelta(days=additional_days)
-            valid_days = (valid_until - datetime.now(timezone.utc)).days
+            new_valid_until = old_valid_until + timedelta(days=additional_days)
+            valid_days = (new_valid_until - datetime.now(timezone.utc)).days
         else:
             valid_days = (old_valid_until - datetime.now(timezone.utc)).days
         
         machine_limit = new_machine_limit or old_certificate["limits"]["max_machines"]
         
-        old_services = [svc for svc, data in old_certificate["services"].items() if data.get("enabled")]
-        allowed_services = list(set(old_services + (additional_services or [])))
+        old_docker_services = old_certificate.get("docker", {}).get("services", {})
+        old_enabled = [svc for svc, cfg in old_docker_services.items() if cfg.get("enabled")]
         
-        old_images = old_certificate["docker"]["registries"]["registry.yourcompany.com"]["allowed_images"]
-        allowed_docker_images = old_images + (additional_docker_images or [])
+        if additional_services:
+            allowed_services = list(set(old_enabled + additional_services))
+        else:
+            allowed_services = self.TIER_SERVICES.get(tier, old_enabled)
+        
+        old_tags = {svc: cfg.get("tag") for svc, cfg in old_docker_services.items()}
+        if new_image_tags:
+            old_tags.update(new_image_tags)
         
         new_cert = self.generate_certificate(
             customer_id=customer_id,
@@ -424,11 +588,12 @@ class AdvancedCertificateGenerator:
             tier=tier,
             valid_days=valid_days,
             machine_limit=machine_limit,
-            allowed_services=allowed_services,
-            allowed_docker_images=allowed_docker_images,
+            custom_services=allowed_services,
+            custom_image_tags=old_tags,
             parent_cert_id=old_certificate["certificate_id"],
             metadata={
                 "upgrade_from_tier": old_certificate["tier"],
+                "upgrade_to_tier": tier,
                 "upgrade_reason": "customer_upgrade",
                 "upgraded_at": datetime.now(timezone.utc).isoformat()
             }
@@ -437,122 +602,3 @@ class AdvancedCertificateGenerator:
         new_cert["upgrade_chain"]["upgrade_count"] = old_certificate["upgrade_chain"]["upgrade_count"] + 1
         
         return new_cert
-    
-    def verify_certificate(self, certificate: Dict[str, Any], public_key_path: str = "public_key.pem") -> tuple[bool, str]:
-        """Verify certificate authenticity"""
-        
-        try:
-            with open(public_key_path, "rb") as f:
-                public_key = serialization.load_pem_public_key(f.read(), backend=default_backend())
-            
-            signature = base64.b64decode(certificate["signature"])
-            
-            cert_copy = certificate.copy()
-            cert_copy.pop("signature")
-            cert_copy.pop("signature_timestamp")
-            
-            cert_bytes = json.dumps(cert_copy, sort_keys=True).encode()
-            
-            public_key.verify(
-                signature,
-                cert_bytes,
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA512()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA512()
-            )
-            
-            hmac_key = base64.b64decode(certificate["security"]["hmac_key"])
-            expected_hmac = hmac.new(hmac_key, cert_bytes, hashlib.sha512).hexdigest()
-            
-            if expected_hmac != certificate["security"]["hmac"]:
-                return False, "HMAC verification failed"
-            
-            valid_until = datetime.fromisoformat(certificate["validity"]["valid_until"])
-            if datetime.now(timezone.utc) > valid_until:
-                return False, "Certificate expired"
-            
-            return True, "Valid"
-            
-        except Exception as e:
-            return False, f"Verification failed: {str(e)}"
-
-
-def main():
-    """Demo"""
-    print("=" * 80)
-    print("ADVANCED CERTIFICATE GENERATION SYSTEM - DEMO")
-    print("=" * 80)
-    
-    generator = AdvancedCertificateGenerator()
-    
-    print("\n[1] Generating BASIC tier certificate...")
-    basic_cert = generator.generate_certificate(
-        customer_id="CUST-001",
-        customer_name="Acme Corporation",
-        machine_fingerprint="FP-ABC123-XYZ789-HARDWARE",
-        hostname="OFFICE-PC-001",
-        product_key="ACME-2024-BASIC-X7Y9",
-        tier="basic",
-        valid_days=365,
-        machine_limit=3
-    )
-    
-    print(f"✓ Certificate ID: {basic_cert['certificate_id']}")
-    print(f"✓ Tier: {basic_cert['tier']}")
-    print(f"✓ Services: {len([s for s, d in basic_cert['services'].items() if d['enabled']])} enabled")
-    print(f"✓ Docker Images: {len(basic_cert['docker']['registries']['registry.yourcompany.com']['allowed_images'])}")
-    
-    print("\n[2] Generating ENTERPRISE tier certificate...")
-    enterprise_cert = generator.generate_certificate(
-        customer_id="CUST-002",
-        customer_name="TechGiant Inc",
-        machine_fingerprint="FP-DEF456-UVW012-HARDWARE",
-        hostname="SERVER-PROD-001",
-        product_key="TECH-2024-ENT-A1B2",
-        tier="enterprise",
-        valid_days=365,
-        machine_limit=50,
-        custom_permissions={
-            "custom_feature_1": {"enabled": True},
-            "advanced_analytics": {"enabled": True, "ml_models": True}
-        }
-    )
-    
-    print(f"✓ Certificate ID: {enterprise_cert['certificate_id']}")
-    print(f"✓ Tier: {enterprise_cert['tier']}")
-    print(f"✓ Machine Limit: {enterprise_cert['limits']['max_machines']}")
-    
-    print("\n[3] Upgrading BASIC certificate to PRO...")
-    upgraded_cert = generator.upgrade_certificate(
-        old_certificate=basic_cert,
-        new_tier="pro",
-        additional_days=365,
-        new_machine_limit=10,
-        additional_services=["integrations", "custom_modules"]
-    )
-    
-    print(f"✓ New Certificate ID: {upgraded_cert['certificate_id']}")
-    print(f"✓ Upgraded from: {upgraded_cert['metadata']['upgrade_from_tier']} → {upgraded_cert['tier']}")
-    
-    print("\n[4] Verifying certificate...")
-    is_valid, reason = generator.verify_certificate(upgraded_cert)
-    print(f"✓ Verification: {is_valid} - {reason}")
-    
-    with open("/home/claude/sample_basic_cert.json", "w") as f:
-        json.dump(basic_cert, f, indent=2)
-    
-    with open("/home/claude/sample_enterprise_cert.json", "w") as f:
-        json.dump(enterprise_cert, f, indent=2)
-    
-    with open("/home/claude/sample_upgraded_cert.json", "w") as f:
-        json.dump(upgraded_cert, f, indent=2)
-    
-    print("\n" + "=" * 80)
-    print("✓ Certificates saved!")
-    print("=" * 80)
-
-
-if __name__ == "__main__":
-    main()
