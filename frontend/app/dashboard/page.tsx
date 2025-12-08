@@ -65,10 +65,7 @@ export default function DashboardPage() {
             License management overview
           </p>
         </div>
-        <Link href="/customers" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Plus size={20} />
-          Add Customer
-        </Link>
+        
       </div>
 
       {/* Stats Grid */}

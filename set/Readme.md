@@ -161,3 +161,30 @@ volumes:
 | Basic | frontend, backend | 3 | 365 days |
 | Pro | + analytics | 10 | 365 days |
 | Enterprise | all | 100 | 365 days |
+version: '3.8'
+
+services:
+  ai-dashboard-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=production
+      - DATA_SOURCE=mock
+      - NEXT_PUBLIC_DATA_SOURCE=mock
+      - BACKEND_URL=http://192.168.1.204:8000/api
+      - DATA_FOLDER_PATH=./data/
+    volumes:
+      # Mount the data directory for JSON files
+      # On Windows make sure host path is absolute and container path is absolute.
+      # Use /app/data because the container's WORKDIR is /app in the Dockerfile.
+      - ../data:/app/data:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

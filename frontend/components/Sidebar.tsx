@@ -17,10 +17,17 @@ const navItems = [
     icon: Users,
   },
   {
-    name: 'Licenses',
+    name: 'Licenses(Subscribers)',
     href: '/licenses',
     icon: FileText,
   },
+  {
+    
+    name: 'Certificate Builder',
+    href: '/certificates/create',
+    icon: FileText
+
+  }
 ];
 
 export default function Sidebar() {

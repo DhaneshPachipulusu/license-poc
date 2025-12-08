@@ -401,3 +401,28 @@ def get_license_by_machine(machine_id: str):
 def get_license_by_id(license_id: str):
     """Backward compatibility"""
     return get_machine_by_id(license_id)
+# ===========================================
+# Custom function to update machine certificate
+# ===========================================
+def update_machine_certificate(machine_id: int, certificate: dict):
+    """Update certificate for existing machine"""
+    conn = get_db_connection()
+    
+    # Get current machine
+    machine = conn.execute(
+        "SELECT * FROM machines WHERE id = ?",
+        (machine_id,)
+    ).fetchone()
+    
+    if not machine:
+        return None
+    
+    # Update certificate
+    conn.execute("""
+        UPDATE machines 
+        SET certificate = ?
+        WHERE id = ?
+    """, (json.dumps(certificate), machine_id))
+    
+    conn.commit()
+    return {"success": True}

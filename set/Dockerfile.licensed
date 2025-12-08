@@ -2,9 +2,12 @@
 # Stage 1: Builder
 # =========================
 FROM node:24-alpine3.22 AS builder
+
 WORKDIR /app
+
 COPY package.json package-lock.json* ./
 RUN npm ci --silent
+
 COPY . .
 RUN npm run build
 
@@ -12,40 +15,23 @@ RUN npm run build
 # Stage 2: Runtime
 # =========================
 FROM node:24-alpine3.22
+
 WORKDIR /app
 
-# Install Python for license validation
-RUN apk add --no-cache python3 py3-pip && \
-    pip3 install --break-system-packages cryptography
-
-# Copy license validator
-COPY license_validator/container_validator.py /app/license_validator.py
-
-# Copy Node.js app
 COPY package.json package-lock.json* ./
 RUN npm ci --only=production --silent && npm cache clean --force
+
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 
-# Create app user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-
-# Create license directory
-RUN mkdir -p /var/license && chown appuser:appgroup /var/license
-
 USER appuser
 
 EXPOSE 3005
-
 ENV PORT=3005
 ENV NODE_ENV=production
-ENV LICENSE_PATH=/var/license
-ENV SERVICE_NAME=frontend
-ENV SERVE_ERROR_PAGE=true
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=5s \
   CMD wget -qO- http://localhost:$PORT/ || exit 1
 
-# Startup script: validate license, then start app
-CMD ["sh", "-c", "python3 /app/license_validator.py && npm run start"]
+CMD ["npm", "run", "start"]

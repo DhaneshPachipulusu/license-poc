@@ -30,6 +30,7 @@ from db import (
     get_machine_by_id,
     count_active_machines,
     update_machine_last_seen,
+    update_machine_certificate,
     revoke_machine,
     log_action,
     generate_product_key
@@ -231,6 +232,77 @@ async def get_tier_info():
 
 
 # ===========================================
+# HEARTBEAT ENDPOINT (Revocation Check)
+# ===========================================
+
+@app.post("/api/v1/heartbeat")
+async def heartbeat(request: Request):
+    """Check if machine is still allowed (for revocation detection)"""
+    
+    try:
+        body = await request.json()
+        machine_fingerprint = body.get("machine_fingerprint")
+        service_name = body.get("service_name", "unknown")
+        
+        if not machine_fingerprint:
+            return {"valid": False, "reason": "missing_fingerprint"}
+        
+        # Get machine from database
+        machine = get_machine_by_fingerprint(machine_fingerprint)
+        
+        if not machine:
+            return {"valid": False, "reason": "machine_not_found"}
+        
+        # Check if machine is revoked
+        if machine.get('status') != 'active':
+            log_action(
+                action="heartbeat_rejected_revoked",
+                machine_id=machine['id'],
+                details={"service": service_name, "status": machine.get('status')},
+                ip_address=request.client.host if request.client else "unknown"
+            )
+            return {"valid": False, "reason": "machine_revoked"}
+        
+        # Check if customer is revoked
+        customer = get_customer_by_id(machine['customer_id'])
+        if not customer:
+            return {"valid": False, "reason": "customer_not_found"}
+        
+        if customer.get('revoked'):
+            log_action(
+                action="heartbeat_rejected_customer_revoked",
+                customer_id=customer['id'],
+                machine_id=machine['id'],
+                details={"service": service_name},
+                ip_address=request.client.host if request.client else "unknown"
+            )
+            return {"valid": False, "reason": "customer_revoked"}
+        
+        # Update last_seen timestamp
+        update_machine_last_seen(machine['id'])
+        
+        # Log successful heartbeat
+        log_action(
+            action="heartbeat_success",
+            customer_id=customer['id'],
+            machine_id=machine['id'],
+            details={"service": service_name},
+            ip_address=request.client.host if request.client else "unknown"
+        )
+        
+        return {
+            "valid": True,
+            "reason": "ok",
+            "customer_name": customer['company_name'],
+            "tier": customer.get('tier', 'basic')
+        }
+    
+    except Exception as e:
+        print(f"Heartbeat error: {e}")
+        return {"valid": False, "reason": "server_error"}
+
+
+# ===========================================
 # ACTIVATION ENDPOINT (Main endpoint for .exe)
 # ===========================================
 
@@ -247,26 +319,38 @@ async def activate_machine(req: ActivationRequest, request: Request):
     """
     
     # Check if already activated
-    existing = get_machine_by_fingerprint(req.machine_fingerprint)
-    if existing:
-        certificate = existing.get('certificate')
-        if certificate and isinstance(certificate, str):
-            certificate = json.loads(certificate)
+    @app.post('/api/v1/activate')
+    async def activate_machine(req: ActivationRequest, request: Request):
+        """
+        Activate a machine and return complete activation bundle.
+        """
         
-        # Generate bundle for reactivation
-        bundle = cert_generator.generate_activation_bundle(
-            certificate=certificate,
-            machine_fingerprint=req.machine_fingerprint,
-            include_compose=True
-        )
-        
-        return {
-            "success": True,
-            "message": "Machine already activated - returning existing license",
-            "bundle": bundle,
-            "reactivation": True
-        }
+        # Check if already activated
+        existing = get_machine_by_fingerprint(req.machine_fingerprint)
+        if existing:
+            # Check if SAME product key
+            old_cert = existing.get('certificate')
+            old_product_key = old_cert.get('customer', {}).get('product_key')
+            
+            if old_product_key != req.product_key:
+                # Different key - reject!
+                raise HTTPException(
+                    403,
+                    "This machine is already activated with a different product key"
+                )
+            
+            # Same key - return existing activation
+            return {
+                "success": True,
+                "message": f"✓ Machine already activated ({active_count}/{customer['machine_limit']} machines)",
+                "bundle": bundle,  # ← SAME format as new activation
+                "tier": tier,
+                "customer_name": customer['company_name'],
+                "services_enabled": [s for s, c in old_cert['docker']['services'].items() if c['enabled']]
+                
+            }
     
+    # ... rest of activation code for NEW machines    
     # Validate product key
     customer = get_customer_by_product_key(req.product_key)
     if not customer:
@@ -350,8 +434,124 @@ async def activate_machine(req: ActivationRequest, request: Request):
         "customer_name": customer['company_name'],
         "services_enabled": [s for s, c in certificate['docker']['services'].items() if c['enabled']]
     }
-
-
+# ===========================================
+# Custom Certificate Generation Endpoint
+# ===========================================
+@app.post("/api/v1/certificates/custom-generate")
+async def generate_custom_certificate(request: Request):
+    """
+    Generate custom certificate with flexible configuration
+    For B2B customers needing non-standard configs
+    """
+    data = await request.json()
+    
+    # Extract custom config
+    customer_id = data.get('customer_id')
+    machine_fingerprint = data.get('machine_fingerprint')
+    hostname = data.get('hostname', 'unknown')
+    
+    # Custom services (checkboxes from UI)
+    custom_services = data.get('services', {})
+    # Example: {"frontend": True, "backend": True, "analytics": False}
+    
+    # Custom limits (from form inputs)
+    machine_limit = data.get('machine_limit', 3)
+    valid_days = data.get('valid_days', 365)
+    max_models = data.get('max_models', 5)
+    max_data_gb = data.get('max_data_gb', 100)
+    
+    # Version requirements (optional)
+    min_versions = data.get('min_versions', {})
+    
+    # Get customer
+    customer = get_customer_by_id(customer_id)
+    if not customer:
+        raise HTTPException(404, "Customer not found")
+    
+    # Build custom tier name
+    tier = data.get('tier', 'custom')
+    
+    # Generate certificate with custom config
+    certificate = cert_generator.generate_certificate(
+        customer_id=customer['id'],
+        customer_name=customer['company_name'],
+        machine_fingerprint=machine_fingerprint,
+        hostname=hostname,
+        product_key=customer['product_key'],
+        tier=tier,
+        valid_days=valid_days,
+        machine_limit=machine_limit,
+        metadata={
+            "custom_generated": True,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "custom_services": custom_services,
+            "max_models": max_models,
+            "max_data_gb": max_data_gb
+        }
+    )
+    
+    # Override services with custom selection
+    for service_name, enabled in custom_services.items():
+        if service_name in certificate['docker']['services']:
+            certificate['docker']['services'][service_name]['enabled'] = enabled
+    
+    # Add custom limits to certificate
+    certificate['limits'] = {
+        "max_models": max_models,
+        "max_data_gb": max_data_gb,
+        "max_concurrent_users": data.get('max_concurrent_users', 10)
+    }
+    
+    # Add version requirements
+    if min_versions:
+        certificate['version_requirements'] = min_versions
+    
+    # Generate bundle
+    bundle = cert_generator.generate_activation_bundle(
+        certificate=certificate,
+        machine_fingerprint=machine_fingerprint,
+        include_compose=True
+    )
+    
+    # Save to database (optional - for customer download later)
+    if data.get('save_to_db', True):
+        # Check if machine already exists
+        existing_machine = get_machine_by_fingerprint(machine_fingerprint)
+        if existing_machine:
+            # Update existing
+            update_machine_certificate(existing_machine['id'], certificate)
+        else:
+            # Create new
+            register_machine(
+                customer_id=customer['id'],
+                fingerprint=machine_fingerprint,
+                hostname=hostname,
+                os_info=data.get('os_info', 'Unknown'),
+                app_version="3.0",
+                ip_address=request.client.host if request.client else None,
+                certificate=certificate
+            )
+    
+    # Log action
+    log_action(
+        action="custom_certificate_generated",
+        customer_id=customer['id'],
+        details={
+            "tier": tier,
+            "services": custom_services,
+            "limits": certificate['limits'],
+            "valid_days": valid_days
+        },
+        ip_address=request.client.host if request.client else None
+    )
+    
+    return {
+        "success": True,
+        "message": "Custom certificate generated",
+        "certificate": certificate,
+        "bundle": bundle,
+        "download_filename": f"certificate_{customer['company_name']}_{hostname}.json"
+    }
 # ===========================================
 # VALIDATION ENDPOINT
 # ===========================================

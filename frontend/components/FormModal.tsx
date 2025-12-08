@@ -231,7 +231,11 @@ export default function FormModal({
     <div className="modal-overlay" onClick={handleClose}>
       <div
         className="modal-content"
-        style={{ maxWidth: sizeStyles[size] }}
+        style={{maxWidth: sizeStyles[size],
+                maxHeight: '90vh',  
+                overflowY: 'auto'    }}
+
+
         onClick={(e) => e.stopPropagation()}
       >
         {success && successConfig ? (
