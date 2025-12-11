@@ -45,142 +45,145 @@ LICENSE_SERVER = os.environ.get('LICENSE_SERVER', 'http://localhost:8000')
 PORT = int(os.environ.get('PORT', 3005))
 GRACE_PERIOD_DAYS = 7
 
+# v3.0 NEW: Periodic revalidation interval (1 hour)
+REVALIDATION_INTERVAL = 3600  # Check every 1 hour
+
+# v3.0 NEW: Import additional modules for periodic checks
+import threading
+import time
+import signal
+
 # ===========================================
-# MACHINE FINGERPRINT - PRIORITY ORDER
+# MACHINE FINGERPRINT - v3.0 CORRECTED
 # ===========================================
 
-def get_machine_fingerprint():
+def generate_hardware_fingerprint():
     """
-    Get machine fingerprint with priority order:
-    1. Read from saved machine_id.json (for Docker containers)
-    2. Generate from hardware (first time only)
+    Generate fingerprint EXACTLY as installer does.
+    v3.0 FIX: Match installer algorithm (sorted, with prefixes, no disk serial)
     """
-    
-    # PRIORITY 1: Try to read saved machine ID
-    machine_id_path = os.path.join(LICENSE_PATH, "machine_id.json")
-    
-    if os.path.exists(machine_id_path):
-        try:
-            print(f"  ✓ Reading saved machine ID from: {machine_id_path}")
-            with open(machine_id_path, 'r') as f:
-                data = json.load(f)
-                saved_fingerprint = data.get('machine_fingerprint')
-                
-                if saved_fingerprint and len(saved_fingerprint) > 10:
-                    print(f"  ✓ Using saved fingerprint: {saved_fingerprint[:16]}...")
-                    return saved_fingerprint
-                else:
-                    print(f"  ⚠ Saved fingerprint is invalid, will generate new one")
-        except Exception as e:
-            print(f"  ⚠ Could not read saved machine ID: {e}")
-            print(f"  → Will generate new fingerprint from hardware")
-    else:
-        print(f"  ⚠ No saved machine_id.json found at: {machine_id_path}")
-        print(f"  → Generating fingerprint from hardware...")
-    
-    # PRIORITY 2: Generate from actual hardware
     print("\n🔍 Generating fingerprint from ACTUAL hardware...")
     
     components = []
     
-    # Get hostname
+    # hostname with prefix
     try:
         hostname = platform.node()
+        components.append(f"hostname:{hostname}")
         print(f"  ✓ Hostname: {hostname}")
-        components.append(hostname)
     except Exception as e:
         print(f"  ✗ Could not get hostname: {e}")
     
-    # Get system info
+    # system with prefix
     try:
-        system = f"{platform.system()} {platform.machine()}"
+        system = platform.system()
+        components.append(f"system:{system}")
         print(f"  ✓ System: {system}")
-        components.append(system)
     except Exception as e:
-        print(f"  ✗ Could not get system info: {e}")
+        print(f"  ✗ Could not get system: {e}")
     
-    # Linux-specific IDs
-    if platform.system() == "Linux":
-        # Try /etc/machine-id
-        try:
-            with open('/etc/machine-id', 'r') as f:
-                machine_id = f.read().strip()
-                print(f"  ✓ Machine ID: {machine_id[:16]}...")
-                components.append(machine_id)
-        except Exception as e:
-            print(f"  ⚠ Cannot read /etc/machine-id: {e}")
-        
-        # Try product_uuid
-        try:
-            with open('/sys/class/dmi/id/product_uuid', 'r') as f:
-                uuid = f.read().strip()
-                print(f"  ✓ Product UUID: {uuid[:16]}...")
-                components.append(uuid)
-        except Exception as e:
-            print(f"  ⚠ Cannot read product_uuid: {e}")
+    # machine with prefix
+    try:
+        machine = platform.machine()
+        components.append(f"machine:{machine}")
+        print(f"  ✓ Machine: {machine}")
+    except Exception as e:
+        print(f"  ✗ Could not get machine: {e}")
     
-    # Windows-specific IDs (for installer)
-    elif platform.system() == "Windows":
-        # Try to get MachineGuid
+    # Windows-specific
+    if platform.system() == "Windows":
         try:
             import winreg
-            key = winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
-                r"SOFTWARE\Microsoft\Cryptography",
-                0,
-                winreg.KEY_READ | winreg.KEY_WOW64_64KEY
-            )
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography")
             machine_guid = winreg.QueryValueEx(key, "MachineGuid")[0]
             winreg.CloseKey(key)
+            components.append(f"machine_guid:{machine_guid}")
             print(f"  ✓ MachineGuid: {machine_guid[:16]}...")
-            components.append(machine_guid)
-        except Exception as e:
-            print(f"  ⚠ Cannot read MachineGuid: {e}")
+        except:
+            pass
         
-        # Try to get CPU ID
         try:
             import subprocess
-            result = subprocess.run(
-                ['wmic', 'cpu', 'get', 'ProcessorId'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            result = subprocess.run(["wmic", "cpu", "get", "ProcessorId"], 
+                                    capture_output=True, text=True, timeout=5)
             cpu_id = result.stdout.strip().split('\n')[-1].strip()
             if cpu_id:
+                components.append(f"cpu:{cpu_id}")
                 print(f"  ✓ CPU ID: {cpu_id[:16]}...")
-                components.append(cpu_id)
-        except Exception as e:
-            print(f"  ⚠ Cannot read CPU ID: {e}")
-        
-        # Try to get Disk Serial
-        try:
-            result = subprocess.run(
-                ['wmic', 'diskdrive', 'get', 'SerialNumber'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            disk_serial = result.stdout.strip().split('\n')[-1].strip()
-            if disk_serial:
-                print(f"  ✓ Disk Serial: {disk_serial[:16]}...")
-                components.append(disk_serial)
-        except Exception as e:
-            print(f"  ⚠ Cannot read Disk Serial: {e}")
+        except:
+            pass
     
-    # Generate SHA3-512 fingerprint
-    if not components:
-        print(f"  ✗ ERROR: No hardware components found!")
-        return None
+    # Linux-specific
+    elif platform.system() == "Linux":
+        try:
+            with open("/etc/machine-id", "r") as f:
+                machine_id = f.read().strip()
+                components.append(f"machine_id:{machine_id}")
+                print(f"  ✓ Machine ID: {machine_id[:16]}...")
+        except:
+            pass
+    
+    # Fallback
+    if len(components) < 3:
+        import uuid
+        components.append(f"random:{uuid.uuid4().hex}")
     
     print(f"  Total components: {len(components)}")
     
-    combined = "|".join(components)
-    fingerprint = hashlib.sha3_512(combined.encode()).hexdigest()
+    # CRITICAL: Sort alphabetically (installer does this!)
+    combined = "|".join(sorted(components))
     
+    print(f"  Combined (sorted): {combined[:60]}...")
+    fingerprint = hashlib.sha3_512(combined.encode()).hexdigest()
     print(f"  ✓ Generated fingerprint: {fingerprint[:16]}...")
     
     return fingerprint
+
+
+def get_machine_fingerprint():
+    """
+    v3.0 FIX #1: Always verify fingerprint against real hardware
+    """
+    machine_id_path = os.path.join(LICENSE_PATH, "machine_id.json")
+    
+    # ALWAYS generate from real hardware
+    real_fingerprint = generate_hardware_fingerprint()
+    
+    if not real_fingerprint:
+        print(f"  ✗ ERROR: Could not generate hardware fingerprint!")
+        return None
+    
+    # Check if saved fingerprint exists
+    if os.path.exists(machine_id_path):
+        try:
+            print(f"\n🔐 Verifying against saved fingerprint...")
+            with open(machine_id_path, 'r') as f:
+                data = json.load(f)
+                saved_fingerprint = data.get('machine_fingerprint') or data.get('fingerprint')
+            
+            if saved_fingerprint:
+                if saved_fingerprint == real_fingerprint:
+                    print(f"  ✓ Fingerprint verification PASSED")
+                    print(f"  ✓ Saved fingerprint matches current hardware")
+                    return real_fingerprint
+                else:
+                    print(f"\n" + "="*70)
+                    print(f"  ✗✗✗ SECURITY VIOLATION DETECTED ✗✗✗")
+                    print(f"="*70)
+                    print(f"  Saved fingerprint: {saved_fingerprint[:16]}...")
+                    print(f"  Real fingerprint:  {real_fingerprint[:16]}...")
+                    print(f"  REASON: License was activated on different hardware!")
+                    print(f"="*70)
+                    return None
+            else:
+                print(f"  ⚠ Saved fingerprint is empty, using real hardware fingerprint")
+                return real_fingerprint
+        except Exception as e:
+            print(f"  ⚠ Could not read saved fingerprint: {e}")
+            return real_fingerprint
+    else:
+        print(f"  ⚠ No saved fingerprint found (first activation)")
+        return real_fingerprint
 
 
 # ===========================================
@@ -350,7 +353,7 @@ def check_revocation():
             if data.get('revoked', False):
                 return False, "revoked_by_server"
             
-            return True, None
+            return True, "not_revoked"
     
     except Exception:
         # If server check fails, allow (offline grace)
@@ -451,7 +454,7 @@ def validate_license():
         print(f"\nResult: ✗ INVALID: {result}")
         return False, result, {}
     
-    if "skipped" in rev_status:
+    if rev_status and "skipped" in rev_status:
         print(f"  ⚠ {rev_status} (offline mode)")
     else:
         print(f"  ✓ Not revoked")
@@ -588,17 +591,127 @@ def serve_error_page(result, port):
 # MAIN ENTRY POINT
 # ===========================================
 
-def main():
-    """Main entry point"""
+# ===========================================
+# PERIODIC REVALIDATION (v3.0 FIX #2)
+# ===========================================
+
+def periodic_revalidation():
+    """
+    v3.0 FIX #2: Periodic license revalidation (every 1 hour)
+    - Checks certificate expiry (strict)
+    - Checks server heartbeat (if online)
+    - Terminates services if invalid/expired/revoked
+    """
+    print(f"\n🔄 Periodic revalidation started (every {REVALIDATION_INTERVAL}s = {REVALIDATION_INTERVAL//3600}h)")
     
+    while True:
+        try:
+            time.sleep(REVALIDATION_INTERVAL)
+            
+            print(f"\n" + "="*70)
+            print(f"🔄 PERIODIC REVALIDATION CHECK")
+            print(f"  Time: {datetime.now(timezone.utc).isoformat()}")
+            print("="*70)
+            
+            # Load certificate
+            cert_path = os.path.join(LICENSE_PATH, "certificate.json")
+            if not os.path.exists(cert_path):
+                print(f"  ✗ Certificate file not found!")
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+            
+            with open(cert_path, 'r') as f:
+                certificate = json.load(f)
+            
+            # Check expiry
+            validity = certificate.get('validity', {})
+            valid_until_str = validity.get('valid_until', '')
+            
+            if valid_until_str:
+                from dateutil import parser
+                valid_until = parser.isoparse(valid_until_str.replace("Z", "+00:00"))
+                now = datetime.now(timezone.utc)
+                
+                if now > valid_until:
+                    print(f"\n  ✗✗✗ CERTIFICATE EXPIRED ✗✗✗")
+                    print(f"  → Terminating services...")
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    return
+                else:
+                    days_remaining = (valid_until - now).days
+                    print(f"  ✓ Certificate valid (expires in {days_remaining} days)")
+            
+            # Check fingerprint
+            real_fp = get_machine_fingerprint()
+            if not real_fp:
+                print(f"  ✗ Fingerprint verification failed")
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+            
+            # Check server heartbeat (graceful failure if offline)
+            try:
+                print(f"  → Checking with license server...")
+                heartbeat_url = f"{LICENSE_SERVER}/api/v1/heartbeat"
+                heartbeat_data = {
+                    "machine_fingerprint": real_fp,
+                    "service_name": SERVICE_NAME
+                }
+                
+                req = urllib.request.Request(
+                    heartbeat_url,
+                    data=json.dumps(heartbeat_data).encode('utf-8'),
+                    headers={'Content-Type': 'application/json'},
+                    method='POST'
+                )
+                
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    result = json.loads(response.read().decode('utf-8'))
+                    
+                    if result.get('valid') == False:
+                        print(f"\n  ✗✗✗ LICENSE REVOKED ✗✗✗")
+                        os.kill(os.getpid(), signal.SIGTERM)
+                        return
+                    else:
+                        print(f"  ✓ Server heartbeat OK")
+            
+            except Exception as e:
+                print(f"  ⚠ Cannot reach server (offline mode): {e}")
+                print(f"  → Continuing (will check again in 1 hour)")
+            
+            print(f"\n✅ Periodic revalidation PASSED")
+            print("="*70)
+        
+        except Exception as e:
+            print(f"\n⚠ Periodic revalidation error: {e}")
+
+
+# ===========================================
+# MAIN ENTRY POINT (v3.0 UPDATED)
+# ===========================================
+
+def main():
+    """Main entry point with v3.0 periodic revalidation"""
+    
+    # Initial validation
     valid, reason, details = validate_license()
     
     if valid:
-        # License valid - exit with code 0 (let the app start)
-        print("\n✅ License validation successful - Application starting...\n")
+        print("\n✅ Initial license validation successful")
+        
+        # Start periodic revalidation thread
+        revalidation_thread = threading.Thread(
+            target=periodic_revalidation,
+            daemon=True,
+            name="LicenseRevalidation"
+        )
+        revalidation_thread.start()
+        
+        print("✅ Periodic revalidation thread started (checks every 1 hour)")
+        print("✅ Application starting...\n")
+        
         sys.exit(0)
     else:
-        # License invalid - serve error page
+        # License invalid
         print("\n" + "="*70)
         print("✗ LICENSE INVALID")
         print("="*70)

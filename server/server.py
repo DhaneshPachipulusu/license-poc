@@ -812,7 +812,191 @@ async def root():
         "docs": "/docs"
     }
 
+# ============================================================================
+# DASHBOARD STATS ENDPOINT - ADD THIS TO server.py
+# ============================================================================
 
+# Add this import at the top with other db imports:
+# from db import get_dashboard_stats, get_customers_summary, get_expiring_machines
+
+# Then add these routes:
+
+@app.get("/api/v1/dashboard/stats")
+async def get_dashboard_statistics():
+    """
+    Get dashboard statistics
+    
+    Returns overall metrics for the admin dashboard:
+    - Total customers
+    - Active machines
+    - Machines expiring soon (within 30 days)
+    - Revoked machines
+    - Expired machines
+    """
+    from db import get_dashboard_stats
+    
+    stats = get_dashboard_stats()
+    
+    return {
+        "success": True,
+        "stats": stats,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.get("/api/v1/dashboard/customers-summary")
+async def get_customers_summary_endpoint():
+    """
+    Get detailed summary of all customers with their machine statistics
+    
+    Returns list of customers with:
+    - Customer info (name, product key, tier)
+    - Machine counts (active, expired, revoked, expiring soon)
+    """
+    from db import get_customers_summary
+    
+    customers = get_customers_summary()
+    
+    return {
+        "success": True,
+        "customers": customers,
+        "total": len(customers)
+    }
+
+
+@app.get("/api/v1/dashboard/expiring-machines")
+async def get_expiring_machines_endpoint(days: int = 30):
+    """
+    Get machines expiring within specified days
+    
+    Query params:
+        days: Number of days to look ahead (default 30)
+    
+    Returns list of machines expiring soon with:
+    - Machine info
+    - Customer info
+    - Days remaining until expiry
+    """
+    from db import get_expiring_machines
+    
+    machines = get_expiring_machines(days=days)
+    
+    return {
+        "success": True,
+        "expiring_machines": machines,
+        "total": len(machines),
+        "days_threshold": days
+    }
+
+
+# ============================================================================
+# ALTERNATIVE: COMBINED DASHBOARD ENDPOINT (ALL DATA AT ONCE)
+# ============================================================================
+
+@app.get("/api/v1/dashboard/overview")
+async def get_dashboard_overview():
+    """
+    Get complete dashboard overview in one call
+    
+    Returns:
+    - Statistics (totals)
+    - Recent customers
+    - Expiring machines
+    """
+    from db import (
+        get_dashboard_stats,
+        get_customers_summary,
+        get_expiring_machines
+    )
+    
+    stats = get_dashboard_stats()
+    customers = get_customers_summary()
+    expiring = get_expiring_machines(days=30)
+    
+    # Get only recent customers (last 5)
+    recent_customers = customers[:5]
+    
+    return {
+        "success": True,
+        "stats": stats,
+        "recent_customers": recent_customers,
+        "expiring_machines": expiring,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+# ============================================================================
+# EXAMPLE USAGE
+# ============================================================================
+
+"""
+FRONTEND USAGE EXAMPLES:
+
+1. Get just the stats (for dashboard cards):
+   GET /api/v1/dashboard/stats
+   
+   Response:
+   {
+     "success": true,
+     "stats": {
+       "total_customers": 5,
+       "active_machines": 3,
+       "expiring_soon": 1,
+       "revoked": 1,
+       "expired": 2
+     }
+   }
+
+2. Get customer summaries (for customers table):
+   GET /api/v1/dashboard/customers-summary
+   
+   Response:
+   {
+     "success": true,
+     "customers": [
+       {
+         "id": "...",
+         "company_name": "ACME Corp",
+         "product_key": "ACME-2025-...",
+         "tier": "enterprise",
+         "machine_stats": {
+           "total": 2,
+           "active": 2,
+           "expired": 0,
+           "revoked": 0,
+           "expiring_soon": 0
+         }
+       }
+     ]
+   }
+
+3. Get expiring machines (for alerts):
+   GET /api/v1/dashboard/expiring-machines?days=30
+   
+   Response:
+   {
+     "success": true,
+     "expiring_machines": [
+       {
+         "company_name": "Beta Inc",
+         "hostname": "beta-machine-1",
+         "expires_at": "2025-01-09T...",
+         "days_remaining": 15
+       }
+     ]
+   }
+
+4. Get everything at once (one API call):
+   GET /api/v1/dashboard/overview
+   
+   Response:
+   {
+     "success": true,
+     "stats": {...},
+     "recent_customers": [...],
+     "expiring_machines": [...]
+   }
+"""
 # ===========================================
 # MAIN
 # ===========================================

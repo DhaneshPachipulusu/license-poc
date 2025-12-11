@@ -426,3 +426,253 @@ def update_machine_certificate(machine_id: int, certificate: dict):
     
     conn.commit()
     return {"success": True}
+# ============================================================================
+# DASHBOARD STATS FUNCTION - ADD THIS TO db.py
+# ============================================================================
+
+def get_dashboard_stats() -> dict:
+    """
+    Calculate dashboard statistics
+    
+    Returns:
+        dict: Dashboard metrics including:
+            - total_customers: Number of active customers
+            - active_machines: Machines with valid, non-expired licenses
+            - expiring_soon: Machines expiring within 30 days
+            - revoked: Revoked machines
+            - expired: Expired but not revoked machines
+    """
+    from datetime import datetime, timezone, timedelta
+    from dateutil import parser
+    
+    conn = get_db_connection()
+    now = datetime.now(timezone.utc)
+    thirty_days = now + timedelta(days=30)
+    
+    # Total customers (non-revoked)
+    total_customers = conn.execute("""
+        SELECT COUNT(*) as count
+        FROM customers
+        WHERE revoked = 0
+    """).fetchone()['count']
+    
+    # Get all machines
+    machines = conn.execute("""
+        SELECT id, customer_id, fingerprint, status, certificate
+        FROM machines
+    """).fetchall()
+    
+    conn.close()
+    
+    # Initialize counters
+    active_machines = 0
+    expiring_soon = 0
+    revoked_count = 0
+    expired_count = 0
+    
+    for machine in machines:
+        # Count revoked
+        if machine['status'] == 'revoked':
+            revoked_count += 1
+            continue
+        
+        # Parse certificate to check expiry
+        cert = machine['certificate']
+        if cert:
+            try:
+                if isinstance(cert, str):
+                    cert = json.loads(cert)
+                
+                # Get expiry date
+                validity = cert.get('validity', {})
+                valid_until_str = validity.get('valid_until') or cert.get('valid_till')
+                
+                if valid_until_str:
+                    # Parse date
+                    if valid_until_str.endswith('Z'):
+                        valid_until_str = valid_until_str.replace('Z', '+00:00')
+                    
+                    valid_until = parser.isoparse(valid_until_str)
+                    
+                    # Check if expired
+                    if now > valid_until:
+                        expired_count += 1
+                    # Check if expiring soon (within 30 days)
+                    elif now <= valid_until <= thirty_days:
+                        expiring_soon += 1
+                        active_machines += 1  # Still active, just expiring soon
+                    # Active and not expiring soon
+                    else:
+                        active_machines += 1
+                else:
+                    # No expiry date, consider active
+                    active_machines += 1
+                    
+            except Exception as e:
+                print(f"Error parsing certificate for machine {machine['id']}: {e}")
+                # If can't parse, consider active
+                active_machines += 1
+        else:
+            # No certificate, consider active
+            active_machines += 1
+    
+    return {
+        "total_customers": total_customers,
+        "active_machines": active_machines,
+        "expiring_soon": expiring_soon,
+        "revoked": revoked_count,
+        "expired": expired_count
+    }
+
+
+# ============================================================================
+# ADDITIONAL HELPER FUNCTIONS (OPTIONAL)
+# ============================================================================
+
+def get_customers_summary() -> list:
+    """
+    Get summary of all customers with machine counts
+    
+    Returns:
+        list: List of customer summaries with machine statistics
+    """
+    from datetime import datetime, timezone
+    from dateutil import parser
+    
+    conn = get_db_connection()
+    
+    customers = conn.execute("""
+        SELECT id, company_name, product_key, machine_limit,
+               tier, revoked, created_at
+        FROM customers
+        ORDER BY created_at DESC
+    """).fetchall()
+    
+    result = []
+    
+    for customer in customers:
+        customer_dict = dict(customer)
+        
+        # Get machines for this customer
+        machines = conn.execute("""
+            SELECT status, certificate
+            FROM machines
+            WHERE customer_id = ?
+        """, (customer['id'],)).fetchall()
+        
+        active_count = 0
+        revoked_count = 0
+        expired_count = 0
+        expiring_soon_count = 0
+        
+        now = datetime.now(timezone.utc)
+        
+        for machine in machines:
+            if machine['status'] == 'revoked':
+                revoked_count += 1
+                continue
+            
+            # Check expiry
+            cert = machine['certificate']
+            if cert:
+                try:
+                    if isinstance(cert, str):
+                        cert = json.loads(cert)
+                    
+                    validity = cert.get('validity', {})
+                    valid_until_str = validity.get('valid_until')
+                    
+                    if valid_until_str:
+                        if valid_until_str.endswith('Z'):
+                            valid_until_str = valid_until_str.replace('Z', '+00:00')
+                        
+                        valid_until = parser.isoparse(valid_until_str)
+                        
+                        if now > valid_until:
+                            expired_count += 1
+                        else:
+                            active_count += 1
+                            # Check if expiring in 30 days
+                            days_remaining = (valid_until - now).days
+                            if days_remaining <= 30:
+                                expiring_soon_count += 1
+                except:
+                    active_count += 1
+            else:
+                active_count += 1
+        
+        customer_dict['machine_stats'] = {
+            'total': len(machines),
+            'active': active_count,
+            'expired': expired_count,
+            'revoked': revoked_count,
+            'expiring_soon': expiring_soon_count
+        }
+        
+        result.append(customer_dict)
+    
+    conn.close()
+    return result
+
+
+def get_expiring_machines(days: int = 30) -> list:
+    """
+    Get machines expiring within specified days
+    
+    Args:
+        days: Number of days to look ahead (default 30)
+    
+    Returns:
+        list: Machines expiring within the specified timeframe
+    """
+    from datetime import datetime, timezone, timedelta
+    from dateutil import parser
+    
+    conn = get_db_connection()
+    now = datetime.now(timezone.utc)
+    threshold = now + timedelta(days=days)
+    
+    machines = conn.execute("""
+        SELECT m.id, m.customer_id, m.fingerprint, m.hostname, 
+               m.certificate, c.company_name, c.product_key
+        FROM machines m
+        JOIN customers c ON m.customer_id = c.id
+        WHERE m.status = 'active'
+    """).fetchall()
+    
+    conn.close()
+    
+    expiring = []
+    
+    for machine in machines:
+        cert = machine['certificate']
+        if cert:
+            try:
+                if isinstance(cert, str):
+                    cert = json.loads(cert)
+                
+                validity = cert.get('validity', {})
+                valid_until_str = validity.get('valid_until')
+                
+                if valid_until_str:
+                    if valid_until_str.endswith('Z'):
+                        valid_until_str = valid_until_str.replace('Z', '+00:00')
+                    
+                    valid_until = parser.isoparse(valid_until_str)
+                    
+                    # Check if expiring within threshold
+                    if now < valid_until <= threshold:
+                        days_remaining = (valid_until - now).days
+                        
+                        machine_dict = dict(machine)
+                        machine_dict['expires_at'] = valid_until_str
+                        machine_dict['days_remaining'] = days_remaining
+                        
+                        expiring.append(machine_dict)
+            except:
+                pass
+    
+    # Sort by days remaining (ascending)
+    expiring.sort(key=lambda x: x['days_remaining'])
+    
+    return expiring

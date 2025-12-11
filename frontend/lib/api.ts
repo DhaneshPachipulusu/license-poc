@@ -7,6 +7,22 @@ const api = axios.create({
   },
 });
 
+// Dashboard Stats - NEW!
+export async function getDashboardStats() {
+  const { data } = await api.get<{
+    success: boolean;
+    stats: {
+      total_customers: number;
+      active_machines: number;
+      expiring_soon: number;
+      revoked: number;
+      expired: number;
+    };
+    timestamp: string;
+  }>('/api/v1/dashboard/stats');
+  return data;
+}
+
 // Customer APIs
 export async function getCustomers() {
   const { data } = await api.get<{ customers: any[] }>('/api/v1/admin/customers');

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getCustomers } from '@/lib/api';
+import { getCustomers, getDashboardStats } from '@/lib/api';
 import StatCard from '@/components/Statcard';
 import { formatDate } from '@/lib/utils';
 import { Users, Monitor, Clock, Ban, Plus, UserPlus } from 'lucide-react';
@@ -34,20 +34,23 @@ export default function DashboardPage() {
 
   async function loadData() {
     try {
-      const data = await getCustomers();
-      setCustomers(data.customers || []);
+      // Fetch dashboard stats from backend
+      const statsData = await getDashboardStats();
       
-      const total = data.customers?.length || 0;
-      const revoked = data.customers?.filter((c: any) => c.revoked).length || 0;
+      // Fetch customers list for table
+      const customersData = await getCustomers();
       
+      // Update state with real data from backend
       setStats({
-        total_customers: total,
-        active_machines: 0,
-        expiring_soon: 0,
-        revoked: revoked,
+        total_customers: statsData.stats.total_customers,
+        active_machines: statsData.stats.active_machines,
+        expiring_soon: statsData.stats.expiring_soon,
+        revoked: statsData.stats.revoked,
       });
+      
+      setCustomers(customersData.customers || []);
     } catch (error) {
-      console.error('Failed to load customers:', error);
+      console.error('Failed to load dashboard data:', error);
     } finally {
       setLoading(false);
     }

@@ -1,3 +1,5 @@
+import { withRouter } from "next/router";
+
 interface StatCardProps {
   title: string;
   value: number | string;
@@ -10,11 +12,11 @@ const colorStyles = {
   indigo: {
     bg: 'rgba(79, 70, 229, 0.08)',
     border: 'rgba(79, 70, 229, 0.15)',
-    icon: '#4f46e5',
+    icon: '#6861ceff',
   },
   emerald: {
     bg: 'rgba(16, 185, 129, 0.08)',
-    border: 'rgba(16, 185, 129, 0.15)',
+    border: 'rgba(255, 255, 255, 0.15)',
     icon: '#059669',
   },
   amber: {
@@ -27,6 +29,11 @@ const colorStyles = {
     border: 'rgba(239, 68, 68, 0.15)',
     icon: '#dc2626',
   },
+  white: {
+    bg: 'rgba(255, 255, 255, 0.08)',
+    border: 'rgba(255, 255, 255, 0.15)',
+    icon: '#ff0000ff',
+  }
 };
 
 export default function StatCard({ title, value, subtitle, icon, color }: StatCardProps) {
