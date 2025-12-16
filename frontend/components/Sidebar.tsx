@@ -22,7 +22,7 @@ const navItems = [
     icon: FileText,
   },
   {
-    
+
     name: 'Certificate Builder',
     href: '/certificates/create',
     icon: FileText
@@ -46,28 +46,55 @@ export default function Sidebar() {
       flexDirection: 'column',
     }}>
       {/* Logo */}
-      <div style={{
-        padding: '24px',
-        borderBottom: '1px solid var(--border-subtle)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{
-            width: '40px',
-            height: '40px',
-            borderRadius: '12px',
-            backgroundColor: '#4f46e5',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 0 40px rgba(99, 102, 241, 0.15)',
-          }}>
-            <Lock size={24} color="white" />
+      <div
+        style={{
+          padding: "24px",
+          borderBottom: "1px solid var(--border-subtle)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          {/* Logo container */}
+          <div
+            style={{
+              width: "40px",
+              height: "40px",
+              borderRadius: "12px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 0 40px rgba(99, 102, 241, 0.15)",
+              backgroundColor: "white",
+            }}
+          >
+            <img
+              src="/X_Light_Mode.svg"
+              alt="Logo"
+              style={{ width: "28px", height: "28px" }}
+            />
           </div>
+
+          {/* Text */}
           <div>
-            <h1 style={{ fontWeight: 'bold', color: 'var(--text-primary)', fontSize: '16px' }}>
+            <h1
+              style={{
+                fontWeight: "bold",
+                color: "var(--text-primary)",
+                fontSize: "16px",
+                margin: 0,
+              }}
+            >
               License Control
             </h1>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Admin Panel</p>
+
+            <p
+              style={{
+                fontSize: "12px",
+                color: "var(--text-muted)",
+                margin: 0,
+              }}
+            >
+              Admin Panel
+            </p>
           </div>
         </div>
       </div>
@@ -76,10 +103,10 @@ export default function Sidebar() {
       <nav style={{ flex: 1, padding: '16px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           {navItems.map((item) => {
-            const isActive = pathname === item.href || 
+            const isActive = pathname === item.href ||
               (item.href !== '/dashboard' && pathname.startsWith(item.href));
             const Icon = item.icon;
-            
+
             return (
               <Link
                 key={item.name}

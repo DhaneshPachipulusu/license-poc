@@ -118,7 +118,7 @@ export default function LicensesPage() {
           All Licenses
         </h1>
         <p style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>
-          View all activated machines across customers
+          View all activated machines and licenses across customers
         </p>
       </div>
 

@@ -836,7 +836,6 @@ async def get_dashboard_statistics():
     from db import get_dashboard_stats
     
     stats = get_dashboard_stats()
-    
     return {
         "success": True,
         "stats": stats,

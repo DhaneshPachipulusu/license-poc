@@ -16,7 +16,7 @@ const colorStyles = {
   },
   emerald: {
     bg: 'rgba(16, 185, 129, 0.08)',
-    border: 'rgba(255, 255, 255, 0.15)',
+    border: 'rgba(31, 185, 28, 0.15)',
     icon: '#059669',
   },
   amber: {
