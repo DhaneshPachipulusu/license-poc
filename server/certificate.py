@@ -37,8 +37,8 @@ class AdvancedCertificateGenerator:
     # Service definitions with images and ports
     SERVICE_DEFINITIONS = {
         "frontend": {
-            "image": "nainovate/ai-dashboard-frontend",
-            "default_tag": "license",  # Changed to license
+            "image": "nainovate/nia-frontend",
+            "default_tag": "v3.0",  # Changed to license
             "container_port": 3005,
             "host_port": 3005,
             "required": True,
