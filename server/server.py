@@ -9,22 +9,29 @@ Features:
 """
 
 import os
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
 import json
 import uuid
+from datetime import datetime, timezone
+from typing import List, Optional, Dict, Any
+
+import bcrypt
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, Header
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic import BaseModel
+    
+
+# Import JWT utilities
+from jwt_utils import create_access_token, decode_access_token
 
 # Import database functions
-from db import (
+from db import (    
     init_db,
     create_customer,
     get_customer_by_product_key,
     get_customer_by_id,
     get_all_customers,
+    mark_machine_expired,
     register_machine,
     get_machine_by_fingerprint,
     get_machine_by_id,
@@ -33,7 +40,15 @@ from db import (
     update_machine_certificate,
     revoke_machine,
     log_action,
-    generate_product_key
+    generate_product_key,
+    count_admin_users,
+    create_admin_user,
+    get_admin_by_username,
+    get_admin_by_id,
+    create_admin_session,
+    get_admin_session,
+    delete_admin_session,
+    clear_admin_sessions,
 )
 
 # Import certificate generator
@@ -45,6 +60,10 @@ from certificate import AdvancedCertificateGenerator
 
 # Docker Hub PAT - Load from environment variable (secure)
 DOCKER_PAT = os.environ.get("DOCKER_PAT", "")
+
+# Admin seed (used ONLY if database has zero admins)
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 
 # Key paths
 PRIVATE_KEY = 'private_key.pem'
@@ -60,9 +79,10 @@ app = FastAPI(
     version="3.0"
 )
 
+# CORS: allow frontend on port 3000 to call backend 8000 with cookies
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[ "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -118,6 +138,11 @@ class UpdateImageTagsRequest(BaseModel):
     image_tags: Dict[str, str]  # {"frontend": "v1.2.3", "backend": "v1.0.0"}
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
 # ===========================================
 # HELPER FUNCTIONS
 # ===========================================
@@ -136,6 +161,48 @@ def get_tier_from_product_key(product_key: str) -> str:
         return "basic"
 
 
+def ensure_admin_bootstrap():
+    """Seed a single admin user if none exists. Uses env only when DB is empty."""
+    existing = count_admin_users()
+    if existing > 0:
+        return
+
+    if not ADMIN_USERNAME or not ADMIN_PASSWORD:
+        raise RuntimeError(
+            "No admin users exist. Set ADMIN_USERNAME and ADMIN_PASSWORD env vars (one-time seed) or insert manually into admin_users."
+        )
+
+    password_hash = bcrypt.hashpw(ADMIN_PASSWORD.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    create_admin_user(ADMIN_USERNAME, password_hash)
+    print("✓ Admin user seeded into SQLite (env used once; runtime auth uses DB only)")
+
+
+async def require_auth(request: Request):
+    """
+    Validate JWT from HttpOnly cookie.
+    Browser automatically includes the cookie on all requests.
+    This is stateless - no session table needed.
+    """
+    # Read JWT from HttpOnly cookie (browser sends automatically)
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    # Decode and validate JWT (fully stateless)
+    payload = decode_access_token(token)
+    
+    # Get admin from database
+    admin_id = payload.get("sub")
+    if not admin_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    
+    admin = get_admin_by_id(admin_id)
+    if not admin:
+        raise HTTPException(status_code=401, detail="Admin not found")
+    
+    return admin
+
+
 # ===========================================
 # STARTUP EVENT
 # ===========================================
@@ -144,6 +211,7 @@ def get_tier_from_product_key(product_key: str) -> str:
 async def startup_event():
     """Initialize database and check configuration"""
     init_db()
+    ensure_admin_bootstrap()
     print("✓ Database initialized")
     print("✓ Certificate generator ready")
     
@@ -156,11 +224,75 @@ async def startup_event():
 
 
 # ===========================================
+# AUTH ENDPOINTS
+# ===========================================
+
+
+@app.post("/auth/login")
+async def admin_login(req: LoginRequest):
+    """JWT-based login endpoint"""
+    admin = get_admin_by_username(req.username)
+    if not admin:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if not bcrypt.checkpw(req.password.encode("utf-8"), admin["password_hash"].encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Create JWT token
+    access_token = create_access_token(
+        data={
+            "sub": str(admin["id"]),
+            "username": admin["username"]
+        }
+    )
+
+    # Return JWT in response AND set secure HttpOnly cookie
+    response = JSONResponse({
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": admin["id"],
+            "username": admin["username"]
+        }
+    })
+    
+    # Store JWT in HttpOnly cookie (fully stateless, no session table needed)
+    # Browser will automatically send this cookie on all subsequent requests
+    # - httponly=True: prevents XSS attacks from stealing token via JavaScript
+    # - samesite="lax": prevents CSRF attacks (allows top-level navigations)
+    # - secure=False: for localhost HTTP (set True in production with HTTPS)
+    # - max_age: matches JWT expiration (24 hours)
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,          # Cannot be accessed via JS (XSS protection)
+        secure=False,           # False for HTTP localhost, True for HTTPS production
+        samesite="lax",         # Prevents CSRF while allowing top-level nav
+        path="/",              # Available to entire app
+        max_age=86400           # 24 hours, matches JWT expiry
+    )
+    return response
+
+
+@app.post("/auth/logout")
+async def admin_logout():
+    """Logout: clear HttpOnly cookie (stateless, no session cleanup needed)"""
+    response = JSONResponse({"success": True})
+    response.delete_cookie("access_token", path="/")  # Clear the JWT cookie
+    return response
+
+
+@app.get("/auth/me")
+async def auth_me(admin=Depends(require_auth)):
+    return {"id": admin["id"], "username": admin["username"]}
+
+
+# ===========================================
 # ADMIN ENDPOINTS
 # ===========================================
 
 @app.post("/api/v1/admin/customers")
-async def create_customer_endpoint(req: CreateCustomerRequest, request: Request):
+async def create_customer_endpoint(req: CreateCustomerRequest, request: Request, admin=Depends(require_auth)):
     """Create a new customer with product key"""
     
     # Get tier defaults
@@ -198,14 +330,14 @@ async def create_customer_endpoint(req: CreateCustomerRequest, request: Request)
 
 
 @app.get("/api/v1/admin/customers")
-async def list_customers():
+async def list_customers(admin=Depends(require_auth)):
     """List all customers"""
     customers = get_all_customers()
     return {"customers": customers}
 
 
 @app.get("/api/v1/admin/customers/{customer_id}")
-async def get_customer_details(customer_id: str):
+async def get_customer_details(customer_id: str, admin=Depends(require_auth)):
     """Get customer details with machines"""
     from db import get_customer_machines
     
@@ -222,7 +354,7 @@ async def get_customer_details(customer_id: str):
 
 
 @app.get("/api/v1/admin/tiers")
-async def get_tier_info():
+async def get_tier_info(admin=Depends(require_auth)):
     """Get tier configuration info"""
     return {
         "tiers": cert_generator.TIER_LIMITS,
@@ -438,7 +570,7 @@ async def activate_machine(req: ActivationRequest, request: Request):
 # Custom Certificate Generation Endpoint
 # ===========================================
 @app.post("/api/v1/certificates/custom-generate")
-async def generate_custom_certificate(request: Request):
+async def generate_custom_certificate(request: Request, admin=Depends(require_auth)):
     """
     Generate custom certificate with flexible configuration
     For B2B customers needing non-standard configs
@@ -754,12 +886,12 @@ async def heartbeat(machine_fingerprint: str):
     return {"status": "not_found"}
 
 
-@app.post("/api/v1/admin/revoke/{machine_id}")
-async def revoke_machine_endpoint(machine_id: str, request: Request):
+@app.post("/api/v1/admin/machines/{machine_id}/revoke")
+async def revoke_machine_endpoint(machine_id: str, request: Request, admin=Depends(require_auth)):
     """Revoke a machine's license"""
     machine = get_machine_by_id(machine_id)
     if not machine:
-        raise HTTPException(404, "Machine not found")
+        raise HTTPException(status_code=404, detail="Machine not found")
     
     revoke_machine(machine_id)
     
@@ -822,7 +954,7 @@ async def root():
 # Then add these routes:
 
 @app.get("/api/v1/dashboard/stats")
-async def get_dashboard_statistics():
+async def get_dashboard_statistics(admin=Depends(require_auth)):
     """
     Get dashboard statistics
     
@@ -844,7 +976,7 @@ async def get_dashboard_statistics():
 
 
 @app.get("/api/v1/dashboard/customers-summary")
-async def get_customers_summary_endpoint():
+async def get_customers_summary_endpoint(admin=Depends(require_auth)):
     """
     Get detailed summary of all customers with their machine statistics
     
@@ -863,8 +995,9 @@ async def get_customers_summary_endpoint():
     }
 
 
+
 @app.get("/api/v1/dashboard/expiring-machines")
-async def get_expiring_machines_endpoint(days: int = 30):
+async def get_expiring_machines_endpoint(days: int = 30, admin=Depends(require_auth)):
     """
     Get machines expiring within specified days
     
@@ -886,14 +1019,14 @@ async def get_expiring_machines_endpoint(days: int = 30):
         "total": len(machines),
         "days_threshold": days
     }
-
+    
 
 # ============================================================================
 # ALTERNATIVE: COMBINED DASHBOARD ENDPOINT (ALL DATA AT ONCE)
 # ============================================================================
 
 @app.get("/api/v1/dashboard/overview")
-async def get_dashboard_overview():
+async def get_dashboard_overview(admin=Depends(require_auth)):
     """
     Get complete dashboard overview in one call
     
@@ -924,6 +1057,11 @@ async def get_dashboard_overview():
     }
 
 
+@app.post("/api/v1/admin/machines/{machine_id}/mark-expired")
+async def mark_machine_expired_endpoint(machine_id: str, admin=Depends(require_auth)):
+    from db import mark_machine_expired
+    updated = mark_machine_expired(machine_id)
+    return {"success": True, "updated": updated}
 # ============================================================================
 # EXAMPLE USAGE
 # ============================================================================

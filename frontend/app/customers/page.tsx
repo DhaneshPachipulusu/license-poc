@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getCustomers, createCustomer } from '@/lib/api';
+import { useAuth } from '@/components/AuthGuard';
+import { getCustomers, getCustomer, createCustomer } from '@/lib/api';
 import { formatDate, copyToClipboard } from '@/lib/utils';
 import { Plus, Search, Users, Check, Copy, ChevronRight } from 'lucide-react';
 import FormModal, { FormField, SuccessConfig } from '@/components/FormModal';
@@ -17,7 +18,6 @@ interface Customer {
   created_at: string;
 }
 
-// Form fields configuration
 const customerFields: FormField[] = [
   {
     name: 'company_name',
@@ -63,7 +63,6 @@ const customerFields: FormField[] = [
   },
 ];
 
-// Success configuration
 const customerSuccessConfig: SuccessConfig = {
   title: 'Customer Created!',
   message: 'Share this product key with your customer:',
@@ -77,20 +76,82 @@ const customerSuccessConfig: SuccessConfig = {
 };
 
 export default function CustomersPage() {
+  const { isAuthenticated } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [machineStatusMap, setMachineStatusMap] = useState<Record<string, 'active' | 'expired' | 'none'>>({});
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
-    loadCustomers();
-  }, []);
+    if (isAuthenticated) {
+      loadCustomersWithStatus();
+    }
+  }, [isAuthenticated]);
 
-  async function loadCustomers() {
+  async function loadCustomersWithStatus() {
     try {
+      setLoading(true);
       const data = await getCustomers();
-      setCustomers(data.customers || []);
+      const customerList = data.customers || [];
+
+      // Load machine status for each customer
+      const statusMap: Record<string, 'active' | 'expired' | 'none'> = {};
+
+      for (const customer of customerList) {
+        try {
+          const details = await getCustomer(customer.id);
+          const machines = details.machines || [];
+
+          if (machines.length === 0) {
+            statusMap[customer.id] = 'none';
+            continue;
+          }
+
+          let hasActive = false;
+          let allExpired = true;
+
+          for (const machine of machines) {
+            if (machine.status === 'revoked') continue;
+
+            try {
+              const cert = typeof machine.certificate === 'string'
+                ? JSON.parse(machine.certificate)
+                : machine.certificate;
+
+              const validUntilStr = cert?.validity?.valid_until;
+              if (!validUntilStr) {
+                allExpired = false;
+                continue;
+              }
+
+              const validUntil = new Date(validUntilStr.replace('+00:00', 'Z'));
+              const isExpired = Date.now() > validUntil.getTime();
+
+              if (!isExpired) {
+                hasActive = true;
+                allExpired = false;
+              }
+            } catch {
+              allExpired = false;
+            }
+          }
+
+          if (hasActive) {
+            statusMap[customer.id] = 'active';
+          } else if (allExpired) {
+            statusMap[customer.id] = 'expired';
+          } else {
+            statusMap[customer.id] = 'active'; // fallback
+          }
+        } catch {
+          statusMap[customer.id] = 'none';
+        }
+      }
+
+      setCustomers(customerList);
+      setMachineStatusMap(statusMap);
     } catch (error) {
       console.error('Failed to load customers:', error);
     } finally {
@@ -104,7 +165,41 @@ export default function CustomersPage() {
     setTimeout(() => setCopiedKey(null), 2000);
   }
 
-  const filteredCustomers = customers.filter(c =>
+  const getCustomerStatusInfo = (customer: Customer) => {
+    if (customer.revoked) {
+      return {
+        label: 'Revoked',
+        bg: 'rgba(239, 68, 68, 0.2)',
+        color: '#ef4444',
+      };
+    }
+
+    const status = machineStatusMap[customer.id];
+
+    if (status === 'none') {
+      return {
+        label: 'No Activations',
+        bg: 'rgba(234, 179, 8, 0.18)',
+        color: '#ca8a04',
+      };
+    }
+
+    if (status === 'expired') {
+      return {
+        label: 'Expired',
+        bg: 'rgba(239, 68, 68, 0.2)',
+        color: '#ef4444',
+      };
+    }
+
+    return {
+      label: 'Active',
+      bg: 'rgba(16, 185, 129, 0.2)',
+      color: '#10b981',
+    };
+  };
+
+  const filteredCustomers = customers.filter((c) =>
     c.company_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.product_key.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -127,7 +222,7 @@ export default function CustomersPage() {
         </button>
       </div>
 
-      {/* Search Bar */}
+      {/* Search */}
       <div style={{ position: 'relative' }}>
         <Search size={20} color="var(--text-muted)" style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)' }} />
         <input
@@ -140,10 +235,10 @@ export default function CustomersPage() {
         />
       </div>
 
-      {/* Customers Table */}
+      {/* Table */}
       {loading ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '80px 0' }}>
-          <div style={{ width: '40px', height: '40px', border: '2px solid #4f46e5', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+          <div style={{ width: '40px', height: '40px', border: '2px solid #6366f1', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
         </div>
       ) : filteredCustomers.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '64px 0' }}>
@@ -177,56 +272,59 @@ export default function CustomersPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredCustomers.map((customer, index) => (
-                <tr key={customer.id} className="table-row" style={{ animationDelay: `${index * 0.03}s` }}>
-                  <td className="table-cell">
-                    <Link href={`/customers/${customer.id}`} style={{ fontWeight: 500, color: 'var(--text-primary)', textDecoration: 'none' }}>
-                      {customer.company_name}
-                    </Link>
-                  </td>
-                  <td className="table-cell">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', backgroundColor: 'var(--bg-tertiary)', padding: '4px 8px', borderRadius: '4px', color: '#4f46e5' }}>
-                        {customer.product_key}
-                      </code>
-                      <button
-                        onClick={() => handleCopyKey(customer.product_key)}
-                        style={{ padding: '4px', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
-                        title="Copy to clipboard"
-                      >
-                        {copiedKey === customer.product_key ? (
-                          <Check size={16} color="#059669" />
-                        ) : (
-                          <Copy size={16} color="var(--text-muted)" />
-                        )}
-                      </button>
-                    </div>
-                  </td>
-                  <td className="table-cell" style={{ color: 'var(--text-secondary)' }}>
-                    {customer.machine_limit}
-                  </td>
-                  <td className="table-cell" style={{ color: 'var(--text-secondary)' }}>
-                    {customer.valid_days} days
-                  </td>
-                  <td className="table-cell">
-                    <span className="badge" style={{
-                      backgroundColor: customer.revoked ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)',
-                      color: customer.revoked ? '#dc2626' : '#059669',
-                      borderColor: customer.revoked ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
-                    }}>
-                      {customer.revoked ? 'Revoked' : 'Active'}
-                    </span>
-                  </td>
-                  <td className="table-cell" style={{ color: 'var(--text-muted)' }}>
-                    {formatDate(customer.created_at)}
-                  </td>
-                  <td className="table-cell">
-                    <Link href={`/customers/${customer.id}`} style={{ color: '#4f46e5', textDecoration: 'none', fontSize: '14px', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      View Details <ChevronRight size={16} />
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {filteredCustomers.map((customer, index) => {
+                const statusInfo = getCustomerStatusInfo(customer);
+
+                return (
+                  <tr key={customer.id} className="table-row" style={{ animationDelay: `${index * 0.03}s` }}>
+                    <td className="table-cell">
+                      <Link href={`/customers/${customer.id}`} style={{ fontWeight: 500, color: 'var(--text-primary)', textDecoration: 'none' }}>
+                        {customer.company_name}
+                      </Link>
+                    </td>
+                    <td className="table-cell">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', backgroundColor: 'var(--bg-tertiary)', padding: '4px 8px', borderRadius: '4px', color: '#6366f1' }}>
+                          {customer.product_key}
+                        </code>
+                        <button
+                          onClick={() => handleCopyKey(customer.product_key)}
+                          style={{ padding: '4px', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
+                          title="Copy to clipboard"
+                        >
+                          {copiedKey === customer.product_key ? <Check size={16} color="#10b981" /> : <Copy size={16} color="var(--text-muted)" />}
+                        </button>
+                      </div>
+                    </td>
+                    <td className="table-cell" style={{ color: 'var(--text-secondary)' }}>
+                      {customer.machine_limit}
+                    </td>
+                    <td className="table-cell" style={{ color: 'var(--text-secondary)' }}>
+                      {customer.valid_days} days
+                    </td>
+                    <td className="table-cell">
+                      <span className="badge" style={{
+                        backgroundColor: statusInfo.bg,
+                        color: statusInfo.color,
+                        borderColor: statusInfo.color + '33',
+                        padding: '4px 10px',
+                        fontSize: '13px',
+                        fontWeight: 500,
+                      }}>
+                        {statusInfo.label}
+                      </span>
+                    </td>
+                    <td className="table-cell" style={{ color: 'var(--text-muted)' }}>
+                      {formatDate(customer.created_at)}
+                    </td>
+                    <td className="table-cell">
+                      <Link href={`/customers/${customer.id}`} style={{ color: '#6366f1', textDecoration: 'none', fontSize: '14px', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        View Details <ChevronRight size={16} />
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -241,7 +339,7 @@ export default function CustomersPage() {
         fields={customerFields}
         submitLabel="Create Customer"
         onSubmit={(data) => createCustomer(data)}
-        onSuccess={() => loadCustomers()}
+        onSuccess={() => loadCustomersWithStatus()}
         successConfig={customerSuccessConfig}
         size="md"
       />

@@ -1,70 +1,99 @@
-import { withRouter } from "next/router";
+import { ReactNode } from "react";
 
 interface StatCardProps {
   title: string;
   value: number | string;
-  subtitle?: string;
-  icon: React.ReactNode;
-  color: 'indigo' | 'emerald' | 'amber' | 'red';
+  icon?: ReactNode;
+  active?: boolean;
+  onClick?: () => void;
+  variant: 'purple' | 'orange' | 'green' | 'yellow' | 'red';
 }
 
-const colorStyles = {
-  indigo: {
-    bg: 'rgba(79, 70, 229, 0.08)',
-    border: 'rgba(79, 70, 229, 0.15)',
-    icon: '#6861ceff',
+const colorStyles: Record<StatCardProps['variant'], {
+  bg: string;
+  border: string;
+  iconBg: string;
+  iconColor: string;
+  activeBorder?: string;
+}> = {
+  purple: {
+    bg: '#eef2ff',
+    border: '#c7d2fe',
+    iconBg: '#e0e7ff',
+    iconColor: '#6366f1',
+    activeBorder: '#818cf8',
   },
-  emerald: {
-    bg: 'rgba(16, 185, 129, 0.08)',
-    border: 'rgba(31, 185, 28, 0.15)',
-    icon: '#059669',
+  orange: {
+    bg: '#fff7ed',
+    border: '#fed7aa',
+    iconBg: '#ffedd5',
+    iconColor: '#f97316',
+    activeBorder: '#fb923c',
   },
-  amber: {
-    bg: 'rgba(245, 158, 11, 0.08)',
-    border: 'rgba(245, 158, 11, 0.15)',
-    icon: '#d97706',
+  green: {
+    bg: '#f0fdf4',
+    border: '#bbf7d0',
+    iconBg: '#dcfce7',
+    iconColor: '#22c55e',
+    activeBorder: '#4ade80',
+  },
+  yellow: {
+    bg: '#fffbeb',
+    border: '#fde68a',
+    iconBg: '#fef3c7',
+    iconColor: '#f59e0b',
+    activeBorder: '#fbbf24',
   },
   red: {
-    bg: 'rgba(239, 68, 68, 0.08)',
-    border: 'rgba(239, 68, 68, 0.15)',
-    icon: '#dc2626',
+    bg: '#fef2f2',
+    border: '#fecaca',
+    iconBg: '#fee2e2',
+    iconColor: '#ef4444',
+    activeBorder: '#f87171',
   },
-  white: {
-    bg: 'rgba(255, 255, 255, 0.08)',
-    border: 'rgba(255, 255, 255, 0.15)',
-    icon: '#ff0000ff',
-  }
 };
 
-export default function StatCard({ title, value, subtitle, icon, color }: StatCardProps) {
-  const colors = colorStyles[color];
+export default function StatCard({
+  title,
+  value,
+  icon,
+  active = false,
+  onClick,
+  variant,
+}: StatCardProps) {
+  const colors = colorStyles[variant];
 
   return (
     <div
+      onClick={onClick}
+      className="relative p-6 rounded-xl border transition-all duration-200 cursor-pointer hover:shadow-md"
       style={{
-        padding: '24px',
-        borderRadius: '12px',
         backgroundColor: colors.bg,
-        border: `1px solid ${colors.border}`,
-        transition: 'all 0.2s',
+        borderColor: active ? colors.activeBorder : colors.border,
+        borderWidth: active ? '2px' : '1px',
+        boxShadow: active ? `0 0 0 4px ${colors.activeBorder}20` : undefined,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+      <div className="flex items-start justify-between">
         <div>
-          <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '4px' }}>{title}</p>
-          <p style={{ fontSize: '30px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{value}</p>
-          {subtitle && (
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{subtitle}</p>
-          )}
+          <p className="text-sm text-muted-foreground uppercase tracking-wider mb-1">
+            {title}
+          </p>
+          <p className="text-3xl font-bold text-foreground">
+            {value}
+          </p>
         </div>
-        <div style={{ 
-          padding: '12px', 
-          borderRadius: '12px', 
-          backgroundColor: colors.bg,
-          color: colors.icon,
-        }}>
-          {icon}
-        </div>
+        {icon && (
+          <div
+            className="p-3 rounded-lg"
+            style={{
+              backgroundColor: colors.iconBg,
+              color: colors.iconColor,
+            }}
+          >
+            {icon}
+          </div>
+        )}
       </div>
     </div>
   );

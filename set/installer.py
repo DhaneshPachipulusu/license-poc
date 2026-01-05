@@ -59,7 +59,7 @@ ICON_FILE = "GENXLOGO.ico"          # ← Change to your icon filename
 REQUIRED_PORTS = {
     3005: "Frontend",       # ← Modify ports as needed
     8100: "Backend API",
-    27017: "MongoDB"
+    2701: "MongoDB"
 }
 
 # Installation directory - IMPORTANT: Must match where your certificates are stored!

@@ -1,231 +1,372 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getCustomers, getDashboardStats, getCustomer } from '@/lib/api';
-import StatCard from '@/components/Statcard';
-import { formatDate } from '@/lib/utils';
-import { Users, Monitor, Clock, Ban } from 'lucide-react';
+import Link from 'next/link';
+import { Search, ChevronRight } from 'lucide-react';
+import { getCustomers, getCustomer } from '@/lib/api';
+import { formatDate, formatDateTime, daysUntilExpiry } from '@/lib/utils';
 
-interface DashboardCustomer {
+interface Customer {
   id: string;
   company_name: string;
   product_key: string;
   machine_limit: number;
   valid_days: number;
+  revoked: number;
   created_at: string;
-  status: 'Active' | 'Revoked' | 'No License';
+  tier: string;
 }
 
-type FilterType = 'all' | 'active' | 'revoked' | 'expiring';
+interface MachineWithCustomer {
+  id: string;
+  customer_id: string;
+  customer_name: string;
+  product_key: string;
+  fingerprint: string;
+  hostname: string;
+  os_info: string | null;
+  status: string;
+  tier: string;
+  valid_until: string | null;
+  last_seen: string | null;
+  created_at: string;
+}
+
+type ActiveView = 'customers' | 'all' | 'active' | 'expiring' | 'revoked';
 
 export default function DashboardPage() {
-  const [customers, setCustomers] = useState<DashboardCustomer[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [machines, setMachines] = useState<MachineWithCustomer[]>([]);
+  const [activeView, setActiveView] = useState<ActiveView>('customers');
+  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<FilterType>('all');
 
-  const [stats, setStats] = useState({
-    total_customers: 0,
-    active_machines: 0,
-    expiring_soon: 0,
-    revoked: 0,
-  });
-
+  // Load all data (customers + all machines across customers)
   useEffect(() => {
-    loadDashboard();
+    async function loadAllData() {
+      try {
+        setLoading(true);
+
+        // 1. Load customers list
+        const customersData = await getCustomers();
+        const customerList: Customer[] = customersData.customers || [];
+        setCustomers(customerList);
+
+        // 2. Load all machines (same logic as Licenses page)
+        const allMachines: MachineWithCustomer[] = [];
+
+        for (const customer of customerList) {
+          try {
+            const details = await getCustomer(customer.id);
+            const customerMachines = details.machines || [];
+
+            for (const machine of customerMachines) {
+              const cert = typeof machine.certificate === 'string'
+                ? JSON.parse(machine.certificate)
+                : machine.certificate || {};
+
+              allMachines.push({
+                id: machine.id,
+                customer_id: customer.id,
+                customer_name: customer.company_name,
+                product_key: customer.product_key,
+                fingerprint: machine.fingerprint,
+                hostname: machine.hostname,
+                os_info: machine.os_info,
+                status: machine.status,
+                tier: cert?.tier || 'basic',
+                valid_until: cert?.validity?.valid_until || null,
+                last_seen: machine.last_seen,
+                created_at: machine.created_at,
+              });
+            }
+          } catch (e) {
+            console.error(`Failed to load machines for customer ${customer.id}`);
+          }
+        }
+
+        setMachines(allMachines);
+      } catch (error) {
+        console.error('Failed to load dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadAllData();
   }, []);
 
-  async function loadDashboard() {
-    try {
-      const dashboardStats = await getDashboardStats();
-      const customersResp = await getCustomers();
+  // Compute stats from loaded machines
+  const totalCustomers = customers.length;
 
-      let activeMachines = 0;
-      let revokedMachines = 0;
+  const stats = {
+    total: machines.length,
+    active: machines.filter(m =>
+      m.status !== 'revoked' &&
+      (!m.valid_until || daysUntilExpiry(m.valid_until) > 0)
+    ).length,
+    expiring: machines.filter(m =>
+      m.valid_until &&
+      daysUntilExpiry(m.valid_until) <= 30 &&
+      daysUntilExpiry(m.valid_until) > 0
+    ).length,
+    revoked: machines.filter(m => m.status === 'revoked').length,
+  };
 
-      const result: DashboardCustomer[] = [];
+  // Filter machines based on search + active view
+  const filteredMachines = machines.filter(machine => {
+    const matchesSearch =
+      machine.hostname.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      machine.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      machine.fingerprint.toLowerCase().includes(searchTerm.toLowerCase());
 
-      for (const c of customersResp.customers) {
-        const details = await getCustomer(c.id);
+    if (!matchesSearch) return false;
 
-        const activeCount = details.machines.filter(
-          (m: any) => m.status === 'active'
-        ).length;
+    if (activeView === 'active')
+      return machine.status !== 'revoked' && (!machine.valid_until || daysUntilExpiry(machine.valid_until) > 0);
+    if (activeView === 'expiring')
+      return machine.valid_until && daysUntilExpiry(machine.valid_until) <= 30 && daysUntilExpiry(machine.valid_until) > 0;
+    if (activeView === 'revoked')
+      return machine.status === 'revoked';
 
-        const revokedCount = details.machines.filter(
-          (m: any) => m.status === 'revoked'
-        ).length;
-
-        activeMachines += activeCount;
-        revokedMachines += revokedCount;
-
-        let status: DashboardCustomer['status'] = 'No License';
-        if (activeCount > 0) status = 'Active';
-        else if (revokedCount > 0) status = 'Revoked';
-
-        result.push({
-          id: c.id,
-          company_name: c.company_name,
-          product_key: c.product_key,
-          machine_limit: c.machine_limit,
-          valid_days: c.valid_days,
-          created_at: c.created_at,
-          status,
-        });
-      }
-
-      setCustomers(result);
-
-      setStats({
-        total_customers: customersResp.customers.length,
-        active_machines: activeMachines,
-        expiring_soon: dashboardStats.stats.expiring_soon,
-        revoked: revokedMachines,
-      });
-    } catch (err) {
-      console.error('Dashboard load failed', err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const filteredCustomers = customers.filter((c) => {
-    if (filter === 'all') return true;
-    if (filter === 'active') return c.status === 'Active';
-    if (filter === 'revoked') return c.status === 'Revoked';
-    if (filter === 'expiring') return c.valid_days <= 30;
-    return true;
+    return true; // 'all'
   });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-      {/* HEADER */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', padding: '3px' }}>
+      {/* Header */}
       <div>
-        <h1 style={{ fontSize: '30px', fontWeight: 'bold' }}>Dashboard</h1>
-        <p>License management overview</p>
+        <h1 style={{ fontSize: '30px', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+          Dashboard
+        </h1>
+        <p style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>
+          License management overview
+        </p>
       </div>
 
-      {/* STAT CARDS */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-          gap: '24px',
-        }}
-      >
-        <div onClick={() => setFilter('all')} style={{ cursor: 'pointer' }}>
-          <StatCard
-            title="Total Customers"
-            value={stats.total_customers}
-            icon={<Users />}
-            color="indigo"
-          />
-        </div>
+      {/* 5 Stat Cards - Clickable */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px' }}>
+        <button
+          onClick={() => setActiveView('customers')}
+          className="card card-hover"
+          style={{ borderColor: activeView === 'customers' ? '#818cf8' : 'var(--border-subtle)', cursor: 'pointer' }}
+        >
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+            Total Customers
+          </p>
+          <p style={{ fontSize: '24px', fontWeight: 'bold', color: '#818cf8' }}>
+            {totalCustomers}
+          </p>
+        </button>
 
-        <div onClick={() => setFilter('active')} style={{ cursor: 'pointer' }}>
-          <StatCard
-            title="Active Machines"
-            value={stats.active_machines}
-            icon={<Monitor />}
-            color="emerald"
-          />
-        </div>
+        <button
+          onClick={() => setActiveView('all')}
+          className="card card-hover"
+          style={{ borderColor: activeView === 'all' ? '#818cf8' : 'var(--border-subtle)', cursor: 'pointer' }}
+        >
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+            Total Machines
+          </p>
+          <p style={{ fontSize: '24px', fontWeight: 'bold', color: '#818cf8' }}>
+            {stats.total}
+          </p>
+        </button>
 
-        <div onClick={() => setFilter('expiring')} style={{ cursor: 'pointer' }}>
-          <StatCard
-            title="Expiring Soon"
-            value={stats.expiring_soon}
-            icon={<Clock />}
-            color="amber"
-          />
-        </div>
+        <button
+          onClick={() => setActiveView('active')}
+          className="card card-hover"
+          style={{ borderColor: activeView === 'active' ? '#34d399' : 'var(--border-subtle)', cursor: 'pointer' }}
+        >
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+            Active
+          </p>
+          <p style={{ fontSize: '24px', fontWeight: 'bold', color: '#34d399' }}>
+            {stats.active}
+          </p>
+        </button>
 
-        <div onClick={() => setFilter('revoked')} style={{ cursor: 'pointer' }}>
-          <StatCard
-            title="Revoked"
-            value={stats.revoked}
-            icon={<Ban />}
-            color="red"
-          />
-        </div>
+        <button
+          onClick={() => setActiveView('expiring')}
+          className="card card-hover"
+          style={{ borderColor: activeView === 'expiring' ? '#fbbf24' : 'var(--border-subtle)', cursor: 'pointer' }}
+        >
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+            Expiring Soon
+          </p>
+          <p style={{ fontSize: '24px', fontWeight: 'bold', color: '#fbbf24' }}>
+            {stats.expiring}
+          </p>
+        </button>
+
+        <button
+          onClick={() => setActiveView('revoked')}
+          className="card card-hover"
+          style={{ borderColor: activeView === 'revoked' ? '#f87171' : 'var(--border-subtle)', cursor: 'pointer' }}
+        >
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+            Revoked
+          </p>
+          <p style={{ fontSize: '24px', fontWeight: 'bold', color: '#f87171' }}>
+            {stats.revoked}
+          </p>
+        </button>
       </div>
 
-      {/* CUSTOMERS TABLE */}
-      <div className="card">
-        <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '16px' }}>
-          Customers
-        </h2>
-
-        {loading ? (
-          <div style={{ padding: '40px 0', textAlign: 'center' }}>
-            Loading…
-          </div>
-        ) : (
-          <div className="table-container">
-            <table style={{ width: '100%' }}>
-              <thead>
-                <tr>
-                  <th className="table-header">Company</th>
-                  <th className="table-header">Product Key</th>
-                  <th className="table-header">Machine Limit</th>
-                  <th className="table-header">Valid Days</th>
-                  <th className="table-header">Status</th>
-                  <th className="table-header">Created</th>
+      {/* Content Below Cards */}
+      {activeView === 'customers' ? (
+        /* Customers Table */
+        <div className="table-container">
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                <th className="table-header">Company</th>
+                <th className="table-header">Product Key</th>
+                <th className="table-header">Tier</th>
+                <th className="table-header">Machine Limit</th>
+                <th className="table-header">Valid Days</th>
+                <th className="table-header">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {customers.map((customer) => (
+                <tr key={customer.id} className="table-row">
+                  <td className="table-cell font-medium">{customer.company_name}</td>
+                  <td className="table-cell">
+                    <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' }}>
+                      {customer.product_key}
+                    </span>
+                  </td>
+                  <td className="table-cell">
+                    <span className="badge" style={{
+                      backgroundColor: customer.tier === 'enterprise' ? 'rgba(16,185,129,0.2)' : customer.tier === 'pro' ? 'rgba(139,92,246,0.2)' : 'rgba(56,189,248,0.2)',
+                      color: customer.tier === 'enterprise' ? '#34d399' : customer.tier === 'pro' ? '#a78bfa' : '#38bdf8',
+                    }}>
+                      {customer.tier.toUpperCase()}
+                    </span>
+                  </td>
+                  <td className="table-cell">{customer.machine_limit}</td>
+                  <td className="table-cell">{customer.valid_days}</td>
+                  <td className="table-cell">{formatDate(customer.created_at)}</td>
                 </tr>
-              </thead>
-
-              <tbody>
-                {filteredCustomers.map((c) => (
-                  <tr key={c.id} className="table-row">
-                    <td className="table-cell">{c.company_name}</td>
-
-                    <td className="table-cell">
-                      <code
-                        style={{
-                          fontSize: '12px',
-                          background: 'var(--bg-tertiary)',
-                          padding: '4px 8px',
-                          borderRadius: '4px',
-                        }}
-                      >
-                        {c.product_key}
-                      </code>
-                    </td>
-
-                    <td className="table-cell">{c.machine_limit}</td>
-                    <td className="table-cell">{c.valid_days} days</td>
-
-                    <td className="table-cell">
-                      <span
-                        className="badge"
-                        style={{
-                          backgroundColor:
-                            c.status === 'Active'
-                              ? 'rgba(16,185,129,0.15)'
-                              : c.status === 'Revoked'
-                              ? 'rgba(239,68,68,0.15)'
-                              : 'rgba(156,163,175,0.15)',
-                          color:
-                            c.status === 'Active'
-                              ? '#059669'
-                              : c.status === 'Revoked'
-                              ? '#dc2626'
-                              : '#6b7280',
-                        }}
-                      >
-                        {c.status}
-                      </span>
-                    </td>
-
-                    <td className="table-cell">
-                      {formatDate(c.created_at)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        /* Machines Table - Identical to Licenses Page */
+        <>
+          {/* Search */}
+          <div style={{ position: 'relative' }}>
+            <Search size={20} color="var(--text-muted)" style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)' }} />
+            <input
+              type="text"
+              placeholder="Search by hostname, customer, or fingerprint..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="form-input"
+              style={{ paddingLeft: '48px' }}
+            />
           </div>
-        )}
-      </div>
+
+          {/* Machines Table */}
+          {loading ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '80px 0' }}>
+              <div style={{ width: '40px', height: '40px', border: '2px solid #6366f1', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+            </div>
+          ) : filteredMachines.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', padding: '64px 0' }}>
+              <div style={{ width: '80px', height: '80px', margin: '0 auto 24px', borderRadius: '50%', backgroundColor: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Search size={40} color="var(--text-muted)" />
+              </div>
+              <h3 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>
+                No machines found
+              </h3>
+              <p style={{ color: 'var(--text-muted)' }}>
+                Try adjusting your search or filter
+              </p>
+            </div>
+          ) : (
+            <div className="table-container">
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                    <th className="table-header">Machine</th>
+                    <th className="table-header">Customer</th>
+                    <th className="table-header">Tier</th>
+                    <th className="table-header">Status</th>
+                    <th className="table-header">Expires</th>
+                    <th className="table-header">Last Seen</th>
+                    <th className="table-header">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredMachines.map((machine) => {
+                    const daysLeft = machine.valid_until ? daysUntilExpiry(machine.valid_until) : null;
+
+                    return (
+                      <tr key={machine.id} className="table-row">
+                        <td className="table-cell">
+                          <div>
+                            <p style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{machine.hostname}</p>
+                            <p style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>
+                              {machine.fingerprint.slice(0, 20)}...
+                            </p>
+                          </div>
+                        </td>
+                        <td className="table-cell">
+                          <Link href={`/customers/${machine.customer_id}`} style={{ color: '#818cf8', textDecoration: 'none' }}>
+                            {machine.customer_name}
+                          </Link>
+                        </td>
+                        <td className="table-cell">
+                          <span className="badge" style={{
+                            backgroundColor: machine.tier === 'enterprise' ? 'rgba(16, 185, 129, 0.2)' : machine.tier === 'pro' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(56, 189, 248, 0.2)',
+                            color: machine.tier === 'enterprise' ? '#34d399' : machine.tier === 'pro' ? '#a78bfa' : '#38bdf8',
+                          }}>
+                            {machine.tier.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="table-cell">
+                          <span className="badge" style={{
+                            backgroundColor: machine.status === 'revoked' || (daysLeft !== null && daysLeft <= 0) ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+                            color: machine.status === 'revoked' || (daysLeft !== null && daysLeft <= 0) ? '#f87171' : '#34d399',
+                          }}>
+                            {machine.status === 'revoked' ? 'Revoked' : daysLeft !== null && daysLeft <= 0 ? 'Expired' : 'Active'}
+                          </span>
+                        </td>
+                        <td className="table-cell">
+                          {machine.valid_until ? (
+                            <div>
+                              <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+                                {formatDate(machine.valid_until)}
+                              </p>
+                              {daysLeft !== null && daysLeft > 0 && (
+                                <p style={{ fontSize: '12px', color: daysLeft <= 30 ? '#fbbf24' : 'var(--text-muted)' }}>
+                                  {daysLeft} days left
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>-</span>
+                          )}
+                        </td>
+                        <td className="table-cell" style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
+                          {machine.last_seen ? formatDateTime(machine.last_seen) : 'Never'}
+                        </td>
+                        <td className="table-cell">
+                          <Link href={`/customers/${machine.customer_id}`} style={{ color: '#818cf8', textDecoration: 'none', fontSize: '14px', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            View Customer <ChevronRight size={16} />
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "1",
+    "client": "Acme Corporation",
+    "orgs": { "used": 4, "limit": 5 },
+    "spaces": { "used": 8, "limit": 10 },
+    "users": { "used": 67, "limit": 100 },
+    "tokens": { "used": 842, "limit": 1000 }
+  },
+  {
+    "id": "2",
+    "client": "TechVision Ltd",
+    "orgs": { "used": 3, "limit": 5 },
+    "spaces": { "used": 6, "limit": 10 },
+    "users": { "used": 45, "limit": 100 },
+    "tokens": { "used": 567, "limit": 1000 }
+  },
+  {
+    "id": "3",
+    "client": "Global Solutions",
+    "orgs": { "used": 5, "limit": 5 },
+    "spaces": { "used": 10, "limit": 10 },
+    "users": { "used": 98, "limit": 100 },
+    "tokens": { "used": 989, "limit": 1000 }
+  },
+  {
+    "id": "4",
+    "client": "NexGen Systems",
+    "orgs": { "used": 2, "limit": 5 },
+    "spaces": { "used": 4, "limit": 10 },
+    "users": { "used": 23, "limit": 100 },
+    "tokens": { "used": 312, "limit": 1000 }
+  },
+  {
+    "id": "5",
+    "client": "InnovateCloud",
+    "orgs": { "used": 1, "limit": 5 },
+    "spaces": { "used": 3, "limit": 10 },
+    "users": { "used": 12, "limit": 100 },
+    "tokens": { "used": 156, "limit": 1000 }
+  }
+]
