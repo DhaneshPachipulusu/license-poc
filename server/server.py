@@ -26,6 +26,7 @@ from jwt_utils import create_access_token, decode_access_token
 
 # Import database functions
 from db import (    
+    get_db_connection,
     init_db,
     create_customer,
     get_customer_by_product_key,
@@ -353,6 +354,39 @@ async def get_customer_details(customer_id: str, admin=Depends(require_auth)):
     }
 
 
+@app.delete("/api/v1/admin/customers/{customer_id}")
+async def delete_customer_endpoint(customer_id: str, request: Request, admin=Depends(require_auth)):
+    """Permanently delete a customer and all their machines"""
+    customer = get_customer_by_id(customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    conn = get_db_connection()
+    try:
+        # Delete all machines first
+        conn.execute("DELETE FROM machines WHERE customer_id = ?", (customer_id,))
+        
+        # Then delete the customer
+        conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        
+        conn.commit()
+        
+        log_action(
+            action="customer_deleted",
+            customer_id=customer_id,
+            details={"company_name": customer['company_name']},
+            ip_address=request.client.host if request.client else "unknown"
+        )
+        
+        return {"success": True, "message": "Customer and all machines deleted successfully"}
+    except Exception as e:
+        conn.rollback()
+        print(f"Error deleting customer {customer_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete customer")
+    finally:
+        conn.close()
+
+
 @app.get("/api/v1/admin/tiers")
 async def get_tier_info(admin=Depends(require_auth)):
     """Get tier configuration info"""
@@ -437,9 +471,6 @@ async def heartbeat(request: Request):
 # ===========================================
 # ACTIVATION ENDPOINT (Main endpoint for .exe)
 # ===========================================
-
-@app.post('/api/v1/activate')
-async def activate_machine(req: ActivationRequest, request: Request):
     """
     Activate a machine and return complete activation bundle.
     
@@ -449,41 +480,39 @@ async def activate_machine(req: ActivationRequest, request: Request):
     - Docker compose file (dynamically generated based on tier)
     - Public key for offline verification
     """
+@app.post('/api/v1/activate')
+async def activate_machine(req: ActivationRequest, request: Request):
+    """
+    Activate a machine and return complete activation bundle.
+    """
     
     # Check if already activated
-    @app.post('/api/v1/activate')
-    async def activate_machine(req: ActivationRequest, request: Request):
-        """
-        Activate a machine and return complete activation bundle.
-        """
+    existing = get_machine_by_fingerprint(req.machine_fingerprint)
+    if existing:
+        # Check if SAME product key
+        old_cert = existing.get('certificate')
+        old_product_key = old_cert.get('customer', {}).get('product_key')
         
-        # Check if already activated
-        existing = get_machine_by_fingerprint(req.machine_fingerprint)
-        if existing:
-            # Check if SAME product key
-            old_cert = existing.get('certificate')
-            old_product_key = old_cert.get('customer', {}).get('product_key')
+        if old_product_key != req.product_key:
+            # Different key - reject!
+            raise HTTPException(
+                403,
+                "This machine is already activated with a different product key"
+            )
+        
+        # Same key - return existing activation
+        return {
+            "success": True,
+            "message": f"✓ Machine already activated ({active_count}/{customer['machine_limit']} machines)",
+            "bundle": bundle,  # ← SAME format as new activation
+            "tier": tier,
+            "customer_name": customer['company_name'],
+            "services_enabled": [s for s, c in old_cert['docker']['services'].items() if c['enabled']]
             
-            if old_product_key != req.product_key:
-                # Different key - reject!
-                raise HTTPException(
-                    403,
-                    "This machine is already activated with a different product key"
-                )
-            
-            # Same key - return existing activation
-            return {
-                "success": True,
-                "message": f"✓ Machine already activated ({active_count}/{customer['machine_limit']} machines)",
-                "bundle": bundle,  # ← SAME format as new activation
-                "tier": tier,
-                "customer_name": customer['company_name'],
-                "services_enabled": [s for s, c in old_cert['docker']['services'].items() if c['enabled']]
-                
-            }
-    
-    # ... rest of activation code for NEW machines    
-    # Validate product key
+        }
+
+# ... rest of activation code for NEW machines    
+# Validate product key
     customer = get_customer_by_product_key(req.product_key)
     if not customer:
         raise HTTPException(
@@ -491,11 +520,11 @@ async def activate_machine(req: ActivationRequest, request: Request):
             f"Product key not found: {req.product_key}. "
             "Please check the key or contact support."
         )
-    
+
     # Check if customer is revoked
     if customer.get('revoked'):
         raise HTTPException(403, "Customer license has been revoked")
-    
+
     # Check machine limit
     active_count = count_active_machines(customer['id'])
     if active_count >= customer['machine_limit']:
@@ -504,10 +533,10 @@ async def activate_machine(req: ActivationRequest, request: Request):
             f"Machine limit reached ({active_count}/{customer['machine_limit']}). "
             "Please revoke an existing machine or upgrade your license."
         )
-    
+
     # Get tier from database (not from product key!)
     tier = customer.get('tier', 'basic')  # ← FIX: Read from database
-    
+
     # Generate certificate
     certificate = cert_generator.generate_certificate(
         customer_id=customer['id'],
@@ -525,14 +554,14 @@ async def activate_machine(req: ActivationRequest, request: Request):
             "activation_timestamp": datetime.now(timezone.utc).isoformat()
         }
     )
-    
+
     # Generate complete activation bundle
     bundle = cert_generator.generate_activation_bundle(
         certificate=certificate,
         machine_fingerprint=req.machine_fingerprint,
         include_compose=True
     )
-    
+
     # Save to database
     machine = register_machine(
         customer_id=customer['id'],
@@ -543,7 +572,7 @@ async def activate_machine(req: ActivationRequest, request: Request):
         ip_address=request.client.host if request.client else None,
         certificate=certificate
     )
-    
+
     # Log activation
     log_action(
         action="machine_activated",
@@ -557,7 +586,7 @@ async def activate_machine(req: ActivationRequest, request: Request):
         },
         ip_address=request.client.host if request.client else None
     )
-    
+
     return {
         "success": True,
         "message": f"✓ Activation successful! ({active_count + 1}/{customer['machine_limit']} machines)",
@@ -1062,6 +1091,28 @@ async def mark_machine_expired_endpoint(machine_id: str, admin=Depends(require_a
     from db import mark_machine_expired
     updated = mark_machine_expired(machine_id)
     return {"success": True, "updated": updated}
+
+
+@app.delete("/api/v1/admin/machines/{machine_id}")
+async def delete_machine_endpoint(machine_id: str, admin=Depends(require_auth)):
+    machine = get_machine_by_id(machine_id)
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    
+    conn = get_db_connection()
+    conn.execute("DELETE FROM machines WHERE id = ?", (machine_id,))
+    conn.commit()
+    conn.close()
+    
+    log_action(
+        action="machine_deleted",
+        customer_id=machine['customer_id'],
+        machine_id=machine_id,
+        details={"reason": "manual_cleanup"}
+    )
+    
+    return {"success": True, "message": "Machine permanently deleted"}
+
 # ============================================================================
 # EXAMPLE USAGE
 # ============================================================================

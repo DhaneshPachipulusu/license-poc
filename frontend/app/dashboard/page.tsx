@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Search, ChevronRight } from 'lucide-react';
-import { getCustomers, getCustomer } from '@/lib/api';
+import { Search, ChevronRight, Trash2 } from 'lucide-react'; // ← Added Trash2
+import { getCustomers, getCustomer, deleteCustomer } from '@/lib/api'; // ← Added deleteCustomer
 import { formatDate, formatDateTime, daysUntilExpiry } from '@/lib/utils';
 
 interface Customer {
@@ -41,6 +41,11 @@ export default function DashboardPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // Delete modal state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   // Load all data (customers + all machines across customers)
   useEffect(() => {
     async function loadAllData() {
@@ -52,7 +57,7 @@ export default function DashboardPage() {
         const customerList: Customer[] = customersData.customers || [];
         setCustomers(customerList);
 
-        // 2. Load all machines (same logic as Licenses page)
+        // 2. Load all machines
         const allMachines: MachineWithCustomer[] = [];
 
         for (const customer of customerList) {
@@ -131,6 +136,32 @@ export default function DashboardPage() {
 
     return true; // 'all'
   });
+
+  // Open delete confirmation
+  const openDeleteModal = (customer: Customer) => {
+    setCustomerToDelete(customer);
+    setShowDeleteModal(true);
+  };
+
+  // Handle actual deletion
+  const handleDelete = async () => {
+    if (!customerToDelete) return;
+
+    setDeleting(true);
+    try {
+      await deleteCustomer(customerToDelete.id);
+      // Remove from local state
+      setCustomers(prev => prev.filter(c => c.id !== customerToDelete.id));
+      setMachines(prev => prev.filter(m => m.customer_id !== customerToDelete.id));
+      setShowDeleteModal(false);
+      setCustomerToDelete(null);
+    } catch (error) {
+      console.error('Failed to delete customer:', error);
+      alert('Failed to delete customer');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', padding: '3px' }}>
@@ -214,7 +245,7 @@ export default function DashboardPage() {
 
       {/* Content Below Cards */}
       {activeView === 'customers' ? (
-        /* Customers Table */
+        /* Customers Table - WITH DELETE BUTTON */
         <div className="table-container">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
@@ -225,6 +256,7 @@ export default function DashboardPage() {
                 <th className="table-header">Machine Limit</th>
                 <th className="table-header">Valid Days</th>
                 <th className="table-header">Created</th>
+                <th className="table-header">Actions</th> {/* ← New column */}
               </tr>
             </thead>
             <tbody>
@@ -247,13 +279,28 @@ export default function DashboardPage() {
                   <td className="table-cell">{customer.machine_limit}</td>
                   <td className="table-cell">{customer.valid_days}</td>
                   <td className="table-cell">{formatDate(customer.created_at)}</td>
+                  <td className="table-cell">
+                    <button
+                      onClick={() => openDeleteModal(customer)}
+                      style={{
+                        padding: '6px',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        borderRadius: '6px',
+                      }}
+                      title="Delete Customer"
+                    >
+                      <Trash2 size={16} color="#ef4444" />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       ) : (
-        /* Machines Table - Identical to Licenses Page */
+        /* Machines Table - UNCHANGED */
         <>
           {/* Search */}
           <div style={{ position: 'relative' }}>
@@ -366,6 +413,46 @@ export default function DashboardPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && customerToDelete && (
+        <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ textAlign: 'center', padding: '24px' }}>
+              <div style={{ width: '64px', height: '64px', margin: '0 auto 16px', borderRadius: '50%', backgroundColor: 'rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Trash2 size={32} color="#ef4444" />
+              </div>
+              <h3 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>
+                Delete Customer?
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
+                This will permanently delete <strong>{customerToDelete.company_name}</strong> and all associated machines.
+              </p>
+              <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '24px' }}>
+                This action cannot be undone.
+              </p>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  onClick={() => setShowDeleteModal(false)}
+                  className="btn btn-secondary"
+                  style={{ flex: 1 }}
+                  disabled={deleting}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="btn btn-danger"
+                  style={{ flex: 1 }}
+                  disabled={deleting}
+                >
+                  {deleting ? 'Deleting...' : 'Delete Customer'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

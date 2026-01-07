@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getCustomer, revokeMachine, upgradeCertificate } from '@/lib/api';
+import { getCustomer, revokeMachine, upgradeCertificate, deleteMachine } from '@/lib/api';
 import { formatDate, formatDateTime, copyToClipboard } from '@/lib/utils';
 import {
   ChevronRight, Copy, Check, Monitor, AlertTriangle, Ban,
-  RefreshCw, FileText, X
+  RefreshCw, FileText, X, Trash2
 } from 'lucide-react';
 
 interface Machine {
@@ -59,6 +59,8 @@ export default function CustomerDetailPage() {
 
   const [showCertModal, setShowCertModal] = useState(false);
   const [selectedCert, setSelectedCert] = useState<any>(null);
+
+  const [deletingMachineId, setDeletingMachineId] = useState<string | null>(null);
 
   useEffect(() => {
     loadCustomer();
@@ -119,6 +121,23 @@ export default function CustomerDetailPage() {
     }
   }
 
+  async function handleDeleteMachine(machineId: string) {
+    if (!confirm('Permanently delete this machine? This action cannot be undone.')) {
+      return;
+    }
+
+    setDeletingMachineId(machineId);
+    try {
+      await deleteMachine(machineId);
+      await loadCustomer();
+    } catch (error) {
+      console.error('Failed to delete machine:', error);
+      alert('Failed to delete machine');
+    } finally {
+      setDeletingMachineId(null);
+    }
+  }
+
   function openRevokeModal(machine: Machine) {
     setMachineToRevoke(machine);
     setShowRevokeModal(true);
@@ -161,9 +180,7 @@ export default function CustomerDetailPage() {
     );
   }
 
-  // REAL-TIME EXPIRY DETECTION
   const getMachineStatusInfo = (machine: Machine) => {
-
     if (machine.status === 'revoked') {
       return { label: 'Revoked', bg: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' };
     }
@@ -177,56 +194,33 @@ export default function CustomerDetailPage() {
 
       const validUntilStr = cert?.validity?.valid_until;
 
-      console.log('valid_until raw string:', validUntilStr);
-
       if (!validUntilStr) {
-        console.log('→ No valid_until found → treating as Active');
         return { label: 'Active', bg: 'rgba(16, 185, 129, 0.2)', color: '#10b981' };
       }
 
-      // Normalize +00:00 to Z for reliable parsing
       const normalized = validUntilStr.replace('+00:00', 'Z');
       const validUntil = new Date(normalized);
 
-      const now = new Date();
+      isExpired = Date.now() > validUntil.getTime();
 
-      isExpired = now.getTime() > validUntil.getTime();
-
-      // Auto-sync DB if expired
       if (isExpired && machine.status === 'active') {
-        console.log('→ Sending mark-expired request to backend...');
         fetch(`/api/v1/admin/machines/${machine.id}/mark-expired`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        })
-          .then(res => res.json())
-          .then(data => console.log('mark-expired success:', data))
-          .catch(err => console.error('mark-expired failed:', err));
+        }).catch(() => {});
       }
-
-    } catch (e) {
-      console.error('Error parsing certificate:', e);
-      console.log('→ Treating as Active due to parse error');
-      console.log('=== DEBUG END ===');
-      return { label: 'Active', bg: 'rgba(16, 185, 129, 0.2)', color: '#10b981' };
-    }
+    } catch (e) {}
 
     if (isExpired) {
-      console.log('→ FINAL STATUS: Expired');
-      console.log('=== DEBUG END ===');
       return { label: 'Expired', bg: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' };
     }
 
-    console.log('→ FINAL STATUS: Active');
-    console.log('=== DEBUG END ===');
     return { label: 'Active', bg: 'rgba(16, 185, 129, 0.2)', color: '#10b981' };
   };
 
-  // Accurate active count
   const activeCount = machines.filter(m => {
     if (m.status === 'revoked') return false;
     const info = getMachineStatusInfo(m);
-    return info.label === 'Active' || info.label.includes('Expires in');
+    return info.label === 'Active';
   }).length;
 
   const totalActivated = machines.length;
@@ -235,12 +229,20 @@ export default function CustomerDetailPage() {
     if (customer.revoked) {
       return { label: 'Revoked', bg: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', border: 'rgba(239, 68, 68, 0.35)' };
     }
+
+    const hasRevokedMachine = machines.some(m => m.status === 'revoked');
+    if (hasRevokedMachine) {
+      return { label: 'Revoked', bg: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', border: 'rgba(239, 68, 68, 0.35)' };
+    }
+
     if (totalActivated === 0) {
       return { label: 'No Activations', bg: 'rgba(234, 179, 8, 0.18)', color: '#ca8a04', border: 'rgba(234, 179, 8, 0.35)' };
     }
+
     if (activeCount === 0) {
       return { label: 'All Expired', bg: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', border: 'rgba(239, 68, 68, 0.35)' };
     }
+
     return { label: 'Active', bg: 'rgba(16, 185, 129, 0.2)', color: '#10b981', border: 'rgba(16, 185, 129, 0.35)' };
   };
 
@@ -296,7 +298,6 @@ export default function CustomerDetailPage() {
             </div>
           </div>
 
-          {/* UPDATED: Machine Usage - Shows USED / LIMIT */}
           <div style={{ backgroundColor: 'var(--bg-tertiary)', borderRadius: '12px', padding: '16px' }}>
             <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Machine Usage</p>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
@@ -350,7 +351,6 @@ export default function CustomerDetailPage() {
           </span>
         </div>
 
-        {/* Rest of your table and modals remain exactly the same */}
         {machines.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '48px 0' }}>
             <div style={{ width: '64px', height: '64px', margin: '0 auto 16px', borderRadius: '50%', backgroundColor: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -437,7 +437,7 @@ export default function CustomerDetailPage() {
                           <button onClick={() => openCertModal(machine)} style={{ padding: '8px', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '8px' }} title="View Certificate">
                             <FileText size={16} color="var(--text-muted)" />
                           </button>
-                          {(statusInfo.label === 'Active' || statusInfo.label.includes('Expires in')) && (
+                          {statusInfo.label === 'Active' && (
                             <>
                               <button onClick={() => openRenewModal(machine)} style={{ padding: '8px', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '8px' }} title="Renew/Upgrade">
                                 <RefreshCw size={16} color="#10b981" />
@@ -446,6 +446,23 @@ export default function CustomerDetailPage() {
                                 <Ban size={16} color="#ef4444" />
                               </button>
                             </>
+                          )}
+                          {(statusInfo.label === 'Revoked' || statusInfo.label === 'Expired') && (
+                            <button
+                              onClick={() => handleDeleteMachine(machine.id)}
+                              disabled={deletingMachineId === machine.id}
+                              style={{
+                                padding: '8px',
+                                background: 'none',
+                                border: 'none',
+                                cursor: deletingMachineId === machine.id ? 'not-allowed' : 'pointer',
+                                borderRadius: '8px',
+                                opacity: deletingMachineId === machine.id ? 0.5 : 1
+                              }}
+                              title="Delete Permanently"
+                            >
+                              <Trash2 size={16} color="#ef4444" />
+                            </button>
                           )}
                         </div>
                       </td>
@@ -457,6 +474,137 @@ export default function CustomerDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Revoke Modal */}
+      {showRevokeModal && machineToRevoke && (
+        <div className="modal-overlay" onClick={() => setShowRevokeModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ width: '64px', height: '64px', margin: '0 auto 16px', borderRadius: '50%', backgroundColor: 'rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <AlertTriangle size={32} color="#ef4444" />
+              </div>
+              <h3 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>
+                Revoke Machine?
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                Are you sure you want to revoke this machine?
+              </p>
+              <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '24px' }}>
+                <strong>{machineToRevoke.hostname}</strong> will no longer be able to use the license.
+              </p>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button onClick={() => setShowRevokeModal(false)} className="btn btn-secondary" style={{ flex: 1 }}>
+                  Cancel
+                </button>
+                <button onClick={handleRevoke} disabled={revoking} className="btn btn-danger" style={{ flex: 1 }}>
+                  {revoking ? 'Revoking...' : 'Revoke Machine'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Renew Modal */}
+      {showRenewModal && machineToRenew && (
+        <div className="modal-overlay" onClick={() => setShowRenewModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)' }}>
+                Renew / Upgrade License
+              </h2>
+              <button onClick={() => setShowRenewModal(false)} style={{ padding: '8px', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '8px' }}>
+                <X size={20} color="var(--text-muted)" />
+              </button>
+            </div>
+
+            <div style={{ backgroundColor: 'var(--bg-tertiary)', borderRadius: '12px', padding: '16px', marginBottom: '24px' }}>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>Machine</p>
+              <p style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{machineToRenew.hostname}</p>
+            </div>
+
+            <form onSubmit={(e) => { e.preventDefault(); handleRenew(); }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label className="form-label">Extend by (days)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="3650"
+                  value={renewForm.additional_days}
+                  onChange={(e) => setRenewForm({ ...renewForm, additional_days: parseInt(e.target.value) })}
+                  className="form-input"
+                />
+              </div>
+
+              <div>
+                <label className="form-label">Upgrade Tier (optional)</label>
+                <select
+                  value={renewForm.new_tier}
+                  onChange={(e) => setRenewForm({ ...renewForm, new_tier: e.target.value })}
+                  className="form-select"
+                >
+                  <option value="">Keep current tier</option>
+                  <option value="trial">Trial</option>
+                  <option value="basic">Basic</option>
+                  <option value="pro">Pro</option>
+                  <option value="enterprise">Enterprise</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="form-label">New Machine Limit (optional)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={renewForm.new_machine_limit}
+                  onChange={(e) => setRenewForm({ ...renewForm, new_machine_limit: parseInt(e.target.value) })}
+                  className="form-input"
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', paddingTop: '16px' }}>
+                <button type="button" onClick={() => setShowRenewModal(false)} className="btn btn-secondary" style={{ flex: 1 }}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={renewing} className="btn btn-primary" style={{ flex: 1 }}>
+                  {renewing ? 'Processing...' : 'Renew License'}
+                </button>
+              </div>
+            </form>
+
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '16px' }}>
+              A new certificate will be generated with updated validity
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Certificate Viewer Modal */}
+      {showCertModal && selectedCert && (
+        <div className="modal-overlay" onClick={() => setShowCertModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '640px', maxHeight: '80vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)' }}>
+                Certificate Details
+              </h2>
+              <button onClick={() => setShowCertModal(false)} style={{ padding: '8px', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '8px' }}>
+                <X size={20} color="var(--text-muted)" />
+              </button>
+            </div>
+
+            <pre style={{ backgroundColor: 'var(--bg-tertiary)', borderRadius: '12px', padding: '16px', overflow: 'auto', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-secondary)' }}>
+              {JSON.stringify(selectedCert, null, 2)}
+            </pre>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+              <button onClick={() => copyToClipboard(JSON.stringify(selectedCert, null, 2))} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Copy size={16} /> Copy JSON
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

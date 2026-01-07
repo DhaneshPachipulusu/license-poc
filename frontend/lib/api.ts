@@ -53,6 +53,11 @@ export async function getCustomer(customerId: string) {
   return data;
 }
 
+export async function deleteCustomer(customerId: string) {
+  const { data } = await api.delete(`/api/v1/admin/customers/${customerId}`);
+  return data;
+}
+
 // FIXED: createCustomer - now properly defined and typed
 export async function createCustomer(payload: {
   company_name: string;
@@ -81,6 +86,11 @@ export async function revokeMachine(machineId: string) {
   const { data } = await api.post(
     `/api/v1/admin/machines/${machineId}/revoke`
   );
+  return data;
+}
+
+export async function deleteMachine(machineId: string) {
+  const { data } = await api.delete(`/api/v1/admin/machines/${machineId}`);
   return data;
 }
 
