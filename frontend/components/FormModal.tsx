@@ -76,6 +76,10 @@ export default function FormModal({
           initialData[field.name] = false;
         } else if (field.type === 'number') {
           initialData[field.name] = 0;
+        } else if (field.type === 'select' && field.options && field.options.length > 0) {
+          // Initialize select with first option value
+          const firstOption = field.options[0];
+          initialData[field.name] = typeof firstOption === 'string' ? firstOption : firstOption.value;
         } else {
           initialData[field.name] = '';
         }

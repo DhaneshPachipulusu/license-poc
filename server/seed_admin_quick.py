@@ -3,7 +3,7 @@ import bcrypt
 
 db = 'licenses.db'
 username = 'admin'
-password = 'Nainovate@ai'
+password = '123456'
 
 conn = sqlite3.connect(db)
 

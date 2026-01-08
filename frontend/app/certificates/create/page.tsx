@@ -168,6 +168,13 @@ export default function CreateCertificatePage() {
   ];
 
   async function handleGenerateCertificate(formData: Record<string, any>) {
+    console.log('🔍 FormModal passed formData:', formData);
+    console.log('🔍 customer_id from formData:', formData.customer_id);
+    console.log('🔍 customer_id type:', typeof formData.customer_id);
+    console.log('🔍 customer_id is undefined?', formData.customer_id === undefined);
+    console.log('🔍 customer_id is null?', formData.customer_id === null);
+    console.log('🔍 customer_id is empty string?', formData.customer_id === '');
+  
     const payload = {
       customer_id: formData.customer_id,
       machine_fingerprint: formData.machine_fingerprint,
@@ -187,7 +194,7 @@ export default function CreateCertificatePage() {
       },
       save_to_db: true
     };
-
+    console.log('🔍 Payload to send:', JSON.stringify(payload, null, 2));
     const res = await fetch(
       'http://localhost:8000/api/v1/certificates/custom-generate',
       {
@@ -199,6 +206,8 @@ export default function CreateCertificatePage() {
         body: JSON.stringify(payload)
       }
     );
+    
+
 
     if (!res.ok) {
       const error = await res.json();

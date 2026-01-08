@@ -470,16 +470,7 @@ async def heartbeat(request: Request):
 
 # ===========================================
 # ACTIVATION ENDPOINT (Main endpoint for .exe)
-# ===========================================
-    """
-    Activate a machine and return complete activation bundle.
-    
-    Returns:
-    - Certificate (signed, with service permissions)
-    - Encrypted Docker credentials (AES-256-GCM, keyed to machine fingerprint)
-    - Docker compose file (dynamically generated based on tier)
-    - Public key for offline verification
-    """
+# ===========================================  
 @app.post('/api/v1/activate')
 async def activate_machine(req: ActivationRequest, request: Request):
     """
@@ -905,7 +896,7 @@ async def get_public_key():
         return f.read()
 
 
-@app.post("/api/v1/heartbeat")
+@app.post("/api/v1/heart-beat")
 async def heartbeat(machine_fingerprint: str):
     """Heartbeat from client"""
     machine = get_machine_by_fingerprint(machine_fingerprint)
